@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>扫描件自动裁剪 · Auto Crop for Scans</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">扫描件自动裁剪</span>
+      <span class="brand-sub">自动识别 · 透视校正 · 批量导出</span>
+    </div>
+    <div class="topbar-actions">
+      <label class="btn primary" for="fileInput">导入图片</label>
+      <input id="fileInput" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" multiple hidden>
+      <button id="btnAcceptAll" class="btn" type="button">全部接受</button>
+      <button id="btnClear" class="btn ghost" type="button">清空列表</button>
+    </div>
+  </header>
+
+  <p class="notice" id="notice">
+    也可以把图片直接拖进窗口。所有处理都在本机完成，图片不会上传到任何服务器。
+  </p>
+
+  <main class="layout">
+    <aside class="panel list-panel">
+      <div class="panel-head">
+        <span>图片列表</span>
+        <span class="pill" id="countBadge">0</span>
+      </div>
+      <div id="fileList" class="file-list">
+        <p class="placeholder">还没有导入图片</p>
+      </div>
+    </aside>
+
+    <section class="panel editor-panel">
+      <div class="editor-toolbar">
+        <span id="editorTitle" class="editor-title">未选择图片</span>
+        <span id="metaInfo" class="meta"></span>
+        <div class="spacer"></div>
+        <div id="regionChips" class="chips"></div>
+        <button id="btnRedetect" class="btn small" type="button">重新检测</button>
+        <button id="btnRotate" class="btn small" type="button">旋转 90°</button>
+        <button id="btnAccept" class="btn small primary" type="button">接受本图</button>
+        <button id="btnReject" class="btn small ghost" type="button">丢弃</button>
+      </div>
+
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="canvas"></canvas>
+        <div id="emptyHint" class="empty-hint">
+          <strong>导入图片开始</strong>
+          <span>自动检测后，可拖拽四个角点微调；无法检测时也可手动框选。</span>
+        </div>
+      </div>
+
+      <div class="editor-foot">
+        <div class="status" id="statusText">就绪</div>
+        <div class="crop-preview" id="cropPreview"></div>
+      </div>
+    </section>
+  </main>
+
+  <section class="panel results-panel">
+    <div class="panel-head">
+      <span>结果浏览</span>
+      <span class="pill" id="resultCount">0</span>
+    </div>
+    <div id="resultGrid" class="result-grid">
+      <p class="placeholder">点击“接受本图”后，成品会出现在这里</p>
+    </div>
+  </section>
+
+  <section class="panel export-panel">
+    <div class="panel-head"><span>导出设置</span></div>
+    <form id="exportForm" class="export-form" onsubmit="return false;">
+      <div class="form-grid">
+        <label>输出格式
+          <select id="optFormat">
+            <option value="jpg">JPG</option>
+            <option value="png">PNG</option>
+          </select>
+        </label>
+        <label>JPG 质量 <span class="value" id="qualityValue">92</span>
+          <input id="optQuality" type="range" min="40" max="100" value="92">
+        </label>
+        <label>降采样长边（px，留空表示不缩放）
+          <input id="optMaxEdge" type="number" min="200" max="12000" placeholder="例如 1200">
+        </label>
+        <label>水印文字（留空表示不加水印）
+          <input id="optWmText" type="text" placeholder="例如 © 2026 Family Archive">
+        </label>
+        <label>水印位置
+          <select id="optWmPos">
+            <option value="top-left">左上</option>
+            <option value="top-center">上中</option>
+            <option value="top-right">右上</option>
+            <option value="middle-left">左中</option>
+            <option value="center">居中</option>
+            <option value="middle-right">右中</option>
+            <option value="bottom-left">左下</option>
+            <option value="bottom-center">下中</option>
+            <option value="bottom-right" selected>右下</option>
+          </select>
+        </label>
+        <label>水印透明度 <span class="value" id="opacityValue">35%</span>
+          <input id="optWmOpacity" type="range" min="0" max="100" value="35">
+        </label>
+        <label>标签（可留空）
+          <input id="optLabel" type="text" placeholder="例如 明信片">
+        </label>
+        <label>文件名模板
+          <input id="optTemplate" type="text" value="{name}_{index}" placeholder="{name}_{index}">
+        </label>
+        <label class="span-2">输出目录（绝对路径，留空则写入 data/exports/时间戳）
+          <input id="optOutDir" type="text" placeholder="D:\photo_archive">
+        </label>
+        <label class="checkbox span-2">
+          <input id="optSidecar" type="checkbox" checked>
+          同时写出同名 .json 元数据（含标签与四点坐标）
+        </label>
+      </div>
+      <p class="hint">
+        模板占位符：<code>{name}</code> 原文件名、<code>{index}</code> 序号、<code>{label}</code> 标签、<code>{date}</code> 日期。
+        导出只包含“已接受”的图片。
+      </p>
+    </form>
+    <div class="export-actions">
+      <button id="btnExport" class="btn primary" type="button">批量导出</button>
+      <span class="status" id="exportStatus"></span>
+    </div>
+    <div class="export-result" id="exportResult"></div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

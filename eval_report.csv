@@ -1,0 +1,8 @@
+﻿image,iou,status,confidence,regions,reason
+scan_01_white_card.jpg,0.9954,ok,1.0,1,
+scan_02_postcard_dark.jpg,0.9775,ok,1.0,1,
+scan_04_white_on_white.jpg,0.9834,ok,1.0,1,
+scan_05_perspective.jpg,0.9979,ok,1.0,1,
+scan_06_small_print.jpg,0.9854,ok,1.0,1,
+,,,,,
+SUMMARY,0.9879,"ok=5, partial=0, fail=0",,,
