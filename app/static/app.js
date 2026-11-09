@@ -1,15 +1,15 @@
 'use strict';
 
-// ---------------------------------------------------------------- 状态
+// ---------------------------------------------------------------- state
 
 const STATUS_TEXT = {
-  pending: '待检测',
-  detecting: '检测中…',
-  ok: '已检测',
-  failed: '需手动调整',
-  accepted: '已接受',
-  rejected: '已丢弃',
-  error: '导入失败',
+  pending: 'Pending',
+  detecting: 'Detecting…',
+  ok: 'Detected',
+  failed: 'Needs adjustment',
+  accepted: 'Accepted',
+  rejected: 'Discarded',
+  error: 'Import failed',
 };
 
 const state = { items: [], selectedId: null };
@@ -54,7 +54,7 @@ const el = {
   optSidecar: document.getElementById('optSidecar'),
 };
 
-// ---------------------------------------------------------------- 基础工具
+// ---------------------------------------------------------------- utilities
 
 function setStatus(text, kind) {
   el.statusText.textContent = text || '';
@@ -76,7 +76,7 @@ async function api(path, body) {
   try { data = await response.json(); } catch (error) { data = {}; }
   if (!response.ok) {
     const detail = data.detail;
-    throw new Error(typeof detail === 'string' ? detail : `请求失败（${response.status}）`);
+    throw new Error(typeof detail === 'string' ? detail : `Request failed (${response.status})`);
   }
   return data;
 }
@@ -103,7 +103,7 @@ function defaultQuad(item) {
   ];
 }
 
-// ---------------------------------------------------------------- 列表渲染
+// ---------------------------------------------------------------- list rendering
 
 function renderList() {
   el.fileList.innerHTML = '';
@@ -112,7 +112,7 @@ function renderList() {
   if (!state.items.length) {
     const placeholder = document.createElement('p');
     placeholder.className = 'placeholder';
-    placeholder.textContent = '还没有导入图片';
+    placeholder.textContent = 'No images imported yet';
     el.fileList.appendChild(placeholder);
     return;
   }
@@ -156,7 +156,7 @@ function renderList() {
   });
 }
 
-// ---------------------------------------------------------------- 选择与预览
+// ---------------------------------------------------------------- selection & preview
 
 function selectItem(id) {
   const item = state.items.find((entry) => entry.id === id);
@@ -173,7 +173,7 @@ function selectItem(id) {
     view.img = null;
     canvas.style.display = 'none';
     el.emptyHint.hidden = item.status !== 'error';
-    setStatus(item.error || '该图片导入失败', 'error');
+    setStatus(item.error || 'This image failed to import', 'error');
     return;
   }
 
@@ -192,7 +192,7 @@ function loadPreview(item) {
     drawCanvas();
     updateMeta();
   };
-  image.onerror = () => setStatus('预览图加载失败', 'error');
+  image.onerror = () => setStatus('Failed to load preview', 'error');
   image.src = item.url;
 }
 
@@ -200,9 +200,9 @@ function showCropPreview(item) {
   el.cropPreview.innerHTML = '';
   const image = document.createElement('img');
   image.src = item.cropUrl;
-  image.alt = '裁剪结果';
+  image.alt = 'cropped result';
   const caption = document.createElement('span');
-  caption.textContent = item.cropW ? `成品 ${item.cropW}×${item.cropH}` : '成品';
+  caption.textContent = item.cropW ? `crop ${item.cropW}×${item.cropH}` : 'crop';
   el.cropPreview.appendChild(image);
   el.cropPreview.appendChild(caption);
 }
@@ -215,12 +215,12 @@ function updateMeta() {
   }
   const parts = [];
   if (item.width) parts.push(`${item.width}×${item.height}`);
-  if (typeof item.confidence === 'number') parts.push(`置信度 ${(item.confidence * 100).toFixed(0)}%`);
-  if (item.detectMs != null) parts.push(`检测 ${item.detectMs}ms`);
-  if (item.reason === 'no_region') parts.push('未找到区域，请手动框选');
-  if (item.reason === 'low_confidence') parts.push('置信度偏低，建议检查四角');
-  if (item.edited) parts.push('已手动调整');
-  if (item.rotate) parts.push(`输出旋转 ${item.rotate}°`);
+  if (typeof item.confidence === 'number') parts.push(`confidence ${(item.confidence * 100).toFixed(0)}%`);
+  if (item.detectMs != null) parts.push(`detected in ${item.detectMs}ms`);
+  if (item.reason === 'no_region') parts.push('no region found; please draw a box');
+  if (item.reason === 'low_confidence') parts.push('low confidence; check the corners');
+  if (item.edited) parts.push('manually adjusted');
+  if (item.rotate) parts.push(`output rotated ${item.rotate}°`);
   el.metaInfo.textContent = parts.join(' · ');
 }
 
@@ -232,7 +232,7 @@ function renderChips() {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'chip' + (item.regionIndex === index ? ' active' : '');
-    chip.textContent = `区域 ${index + 1}`;
+    chip.textContent = `Region ${index + 1}`;
     chip.addEventListener('click', () => {
       item.quad = region.quad.map(([x, y]) => [Number(x), Number(y)]);
       item.confidence = region.confidence;
@@ -248,7 +248,7 @@ function renderChips() {
   });
 }
 
-// ---------------------------------------------------------------- 画布绘制
+// ---------------------------------------------------------------- canvas drawing
 
 function drawCanvas() {
   const item = view.item;
@@ -299,7 +299,7 @@ function drawCanvas() {
   });
 }
 
-// ---------------------------------------------------------------- 拖拽
+// ---------------------------------------------------------------- drag handling
 
 function canvasPoint(event) {
   const rect = canvas.getBoundingClientRect();
@@ -422,13 +422,13 @@ function endDrag(event) {
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 
-// ---------------------------------------------------------------- 上传与检测
+// ---------------------------------------------------------------- upload & detect
 
 async function uploadFiles(fileList) {
   const files = Array.from(fileList || []).filter(Boolean);
   if (!files.length) return;
 
-  setStatus(`正在导入 ${files.length} 张图片…`);
+  setStatus(`Importing ${files.length} image(s)…`);
   const form = new FormData();
   files.forEach((file) => form.append('files', file));
 
@@ -436,9 +436,9 @@ async function uploadFiles(fileList) {
   try {
     const response = await fetch('/api/upload', { method: 'POST', body: form });
     data = await response.json();
-    if (!response.ok) throw new Error(data.detail || '导入失败');
+    if (!response.ok) throw new Error(data.detail || 'Import failed');
   } catch (error) {
-    setStatus(`导入失败：${error.message}`, 'error');
+    setStatus(`Import failed: ${error.message}`, 'error');
     return;
   }
 
@@ -472,10 +472,10 @@ async function uploadFiles(fileList) {
   if (!state.selectedId && state.items.length) selectItem(state.items[0].id);
 
   for (let index = 0; index < newItems.length; index += 1) {
-    setStatus(`正在检测 ${index + 1}/${newItems.length}…`);
+    setStatus(`Detecting ${index + 1}/${newItems.length}…`);
     await detectItem(newItems[index], true);
   }
-  setStatus(newItems.length ? `自动检测完成（${newItems.length} 张）` : '没有可检测的图片',
+  setStatus(newItems.length ? `Detection complete (${newItems.length} image(s))` : 'No images to detect',
     newItems.length ? 'ok' : 'error');
 }
 
@@ -504,14 +504,14 @@ async function detectItem(item, quiet) {
     }
     item.edited = false;
     if (!quiet) {
-      setStatus(item.status === 'ok' ? '检测成功，可拖拽四角微调' : '未能可靠检测，已给出初始框，请手动调整',
+      setStatus(item.status === 'ok' ? 'Detection OK; drag corners to fine-tune' : 'Detection inconclusive; an initial box is shown, please adjust it',
         item.status === 'ok' ? 'ok' : 'error');
     }
   } catch (error) {
     item.status = 'failed';
     item.reason = 'error';
     item.quad = defaultQuad(item);
-    setStatus(`检测失败：${error.message}`, 'error');
+    setStatus(`Detection failed: ${error.message}`, 'error');
   }
 
   renderList();
@@ -523,7 +523,7 @@ async function detectItem(item, quiet) {
   }
 }
 
-// ---------------------------------------------------------------- 接受 / 丢弃
+// ---------------------------------------------------------------- accept / discard
 
 async function acceptItem(item, quiet) {
   if (!item || !item.quad || item.status === 'error') return false;
@@ -540,10 +540,10 @@ async function acceptItem(item, quiet) {
     renderList();
     renderResults();
     if (state.selectedId === item.id) showCropPreview(item);
-    if (!quiet) setStatus(`已接受：${item.name}`, 'ok');
+    if (!quiet) setStatus(`Accepted: ${item.name}`, 'ok');
     return true;
   } catch (error) {
-    setStatus(`裁剪失败：${error.message}`, 'error');
+    setStatus(`Crop failed: ${error.message}`, 'error');
     return false;
   }
 }
@@ -556,7 +556,7 @@ function renderResults() {
   if (!accepted.length) {
     const placeholder = document.createElement('p');
     placeholder.className = 'placeholder';
-    placeholder.textContent = '点击“接受本图”后，成品会出现在这里';
+    placeholder.textContent = 'Accepted crops will appear here';
     el.resultGrid.appendChild(placeholder);
     return;
   }
@@ -567,7 +567,7 @@ function renderResults() {
     const image = document.createElement('img');
     image.src = item.cropUrl;
     image.alt = item.name;
-    image.title = '点击回到该图继续调整';
+    image.title = 'Click to go back to this image and adjust it';
     image.addEventListener('click', () => selectItem(item.id));
 
     const caption = document.createElement('div');
@@ -586,7 +586,7 @@ function renderResults() {
   });
 }
 
-// ---------------------------------------------------------------- 导出
+// ---------------------------------------------------------------- export
 
 function readExportOptions() {
   const maxEdgeRaw = el.optMaxEdge.value.trim();
@@ -610,14 +610,14 @@ function renderExportResult(data) {
 
   const pathLine = document.createElement('div');
   pathLine.className = 'out-path';
-  pathLine.textContent = `输出目录：${data.output_dir}`;
+  pathLine.textContent = `Output directory: ${data.output_dir}`;
   el.exportResult.appendChild(pathLine);
 
   if (data.files.length) {
     const list = document.createElement('ul');
     data.files.forEach((file) => {
       const row = document.createElement('li');
-      row.textContent = `${file.name}（${file.width}×${file.height}）`;
+      row.textContent = `${file.name} (${file.width}×${file.height})`;
       list.appendChild(row);
     });
     el.exportResult.appendChild(list);
@@ -627,7 +627,7 @@ function renderExportResult(data) {
     const list = document.createElement('ul');
     data.errors.forEach((error) => {
       const row = document.createElement('li');
-      row.textContent = `失败：${error.image_id} - ${error.error}`;
+      row.textContent = `Failed: ${error.image_id} - ${error.error}`;
       list.appendChild(row);
     });
     el.exportResult.appendChild(list);
@@ -637,12 +637,12 @@ function renderExportResult(data) {
 async function exportAll() {
   const accepted = state.items.filter((item) => item.status === 'accepted' && item.quad);
   if (!accepted.length) {
-    setExportStatus('还没有已接受的图片，请先对每张图点“接受本图”', 'error');
+    setExportStatus('No accepted images yet; click "Accept" on each one first', 'error');
     return;
   }
 
   el.btnExport.disabled = true;
-  setExportStatus(`正在导出 ${accepted.length} 张…`);
+  setExportStatus(`Exporting ${accepted.length} image(s)…`);
   try {
     const data = await api('/api/export', {
       items: accepted.map((item) => ({
@@ -654,17 +654,17 @@ async function exportAll() {
     });
     renderExportResult(data);
     setExportStatus(
-      `导出完成：${data.count} 张${data.errors.length ? `，失败 ${data.errors.length} 张` : ''}`,
+      `Export complete: ${data.count} image(s)${data.errors.length ? `, ${data.errors.length} failed` : ''}`,
       data.errors.length ? 'error' : 'ok'
     );
   } catch (error) {
-    setExportStatus(`导出失败：${error.message}`, 'error');
+    setExportStatus(`Export failed: ${error.message}`, 'error');
   } finally {
     el.btnExport.disabled = false;
   }
 }
 
-// ---------------------------------------------------------------- 事件绑定
+// ---------------------------------------------------------------- event binding
 
 el.fileInput.addEventListener('change', () => {
   uploadFiles(el.fileInput.files);
@@ -673,7 +673,7 @@ el.fileInput.addEventListener('change', () => {
 
 el.btnRedetect.addEventListener('click', async () => {
   if (!view.item) return;
-  setStatus('正在重新检测…');
+  setStatus('Re-detecting…');
   await detectItem(view.item, false);
 });
 
@@ -683,7 +683,7 @@ el.btnRotate.addEventListener('click', async () => {
   item.rotate = (item.rotate + 90) % 360;
   item.edited = true;
   updateMeta();
-  setStatus(`输出将顺时针旋转 ${item.rotate}°`);
+  setStatus(`Output will be rotated ${item.rotate}° clockwise`);
   if (item.status === 'accepted') await acceptItem(item, true);
   renderList();
 });
@@ -699,20 +699,20 @@ el.btnReject.addEventListener('click', () => {
   item.cropUrl = null;
   renderList();
   renderResults();
-  setStatus(`已丢弃：${item.name}`);
+  setStatus(`Discarded: ${item.name}`);
 });
 
 el.btnAcceptAll.addEventListener('click', async () => {
   const targets = state.items.filter((item) => item.quad && item.status !== 'rejected' && item.status !== 'error');
   if (!targets.length) {
-    setStatus('没有可接受的图片', 'error');
+    setStatus('No images available to accept', 'error');
     return;
   }
   for (let index = 0; index < targets.length; index += 1) {
-    setStatus(`正在接受 ${index + 1}/${targets.length}…`);
+    setStatus(`Accepting ${index + 1}/${targets.length}…`);
     await acceptItem(targets[index], true);
   }
-  setStatus(`已接受 ${targets.filter((item) => item.status === 'accepted').length} 张`, 'ok');
+  setStatus(`Accepted ${targets.filter((item) => item.status === 'accepted').length} image(s)`, 'ok');
 });
 
 el.btnClear.addEventListener('click', () => {
@@ -726,13 +726,13 @@ el.btnClear.addEventListener('click', () => {
   canvas.removeAttribute('height');
   canvas.style.display = 'none';
   el.emptyHint.hidden = false;
-  el.editorTitle.textContent = '未选择图片';
+  el.editorTitle.textContent = 'No image selected';
   el.metaInfo.textContent = '';
   el.cropPreview.innerHTML = '';
   el.regionChips.innerHTML = '';
   el.exportResult.innerHTML = '';
   setExportStatus('');
-  setStatus('列表已清空（已导出的文件不会被删除）');
+  setStatus('List cleared (exported files are not deleted)');
   renderList();
   renderResults();
 });
@@ -765,8 +765,8 @@ window.addEventListener('resize', () => {
   if (view.img) drawCanvas();
 });
 
-// ---------------------------------------------------------------- 初始化
+// ---------------------------------------------------------------- init
 
 renderList();
 renderResults();
-setStatus('就绪：导入图片后会自动检测');
+setStatus('Ready: detection runs automatically after import');

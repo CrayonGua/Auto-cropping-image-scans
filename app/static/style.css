@@ -91,7 +91,7 @@ body {
   font-weight: 600;
 }
 
-/* ---------------- 左侧列表 ---------------- */
+/* ---------------- left list ---------------- */
 
 .file-list {
   max-height: 620px;
@@ -147,7 +147,7 @@ body {
   text-align: center;
 }
 
-/* ---------------- 编辑器 ---------------- */
+/* ---------------- editor ---------------- */
 
 .editor-toolbar {
   display: flex;
@@ -247,7 +247,7 @@ canvas:not([width]) { display: none; }
 }
 .crop-preview span { font-size: 11.5px; color: var(--muted); }
 
-/* ---------------- 结果区 ---------------- */
+/* ---------------- results ---------------- */
 
 .results-panel { max-width: 1180px; margin: 14px auto 0; }
 
@@ -286,7 +286,7 @@ canvas:not([width]) { display: none; }
 }
 .result-card .cap strong { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ---------------- 导出区 ---------------- */
+/* ---------------- export ---------------- */
 
 .export-panel { max-width: 1180px; margin: 14px auto 32px; }
 
@@ -346,7 +346,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 }
 .export-result ul { margin: 8px 0 0; padding-left: 18px; }
 
-/* ---------------- 按钮 ---------------- */
+/* ---------------- buttons ---------------- */
 
 .btn {
   display: inline-flex;

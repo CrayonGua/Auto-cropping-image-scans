@@ -1,12 +1,13 @@
-"""在带真值的数据集上评估自动检测的 IoU 成功率。
+"""Evaluate auto-detection IoU success on a labelled dataset.
 
-真值格式：与图片同名的 .json，内容为 {"quad": [[x, y], [x, y], [x, y], [x, y]]}（原图像素坐标）。
+Ground-truth format: a .json with the same name as the image, content
+{"quad": [[x, y], [x, y], [x, y], [x, y]]} in original-image pixel coords.
 
-用法：
+Usage:
     python tools/eval.py --images sample_data/images --labels sample_data/labels
     python tools/eval.py --images sample_data/images --labels sample_data/labels --out eval_report.csv
 
-输出的成功率可以直接放进演示视频和报告里。
+The reported success rate can go directly into the demo video and report.
 """
 
 from __future__ import annotations
@@ -55,7 +56,7 @@ def evaluate(images_dir: Path, labels_dir: Path, output_csv: Path | None) -> int
         path for path in images_dir.iterdir() if path.suffix.lower() in IMAGE_SUFFIXES
     )
     if not image_paths:
-        print(f"没有找到图片：{images_dir}")
+        print(f"No images found in: {images_dir}")
         return 1
 
     rows: list[dict] = []
@@ -93,7 +94,7 @@ def evaluate(images_dir: Path, labels_dir: Path, output_csv: Path | None) -> int
         )
 
     if not rows:
-        print("所有图片都缺少真值标注，未做评估。")
+        print("No images have ground-truth labels; nothing to evaluate.")
         return 1
 
     ok = sum(1 for row in rows if row["status"] == "ok")
@@ -101,7 +102,7 @@ def evaluate(images_dir: Path, labels_dir: Path, output_csv: Path | None) -> int
     failed = len(rows) - ok - partial
     mean_iou = sum(row["iou"] for row in rows) / len(rows)
 
-    print(f"{'图片':<38}{'IoU':>8}{'判定':>10}{'置信度':>10}{'候选数':>8}")
+    print(f"{'Image':<38}{'IoU':>8}{'Status':>10}{'Conf':>10}{'Regions':>8}")
     for row in rows:
         print(
             f"{row['image']:<38}{row['iou']:>8.3f}{row['status']:>10}"
@@ -109,12 +110,12 @@ def evaluate(images_dir: Path, labels_dir: Path, output_csv: Path | None) -> int
         )
 
     print("-" * 76)
-    print(f"样本数 {len(rows)}｜平均 IoU {mean_iou:.3f}")
-    print(f"成功(IoU>=0.85) {ok} ({ok / len(rows) * 100:.1f}%)")
-    print(f"部分成功(0.70-0.85) {partial}")
-    print(f"失败(<0.70) {failed}")
+    print(f"Samples {len(rows)} | mean IoU {mean_iou:.3f}")
+    print(f"Success (IoU>=0.85): {ok} ({ok / len(rows) * 100:.1f}%)")
+    print(f"Partial (0.70-0.85): {partial}")
+    print(f"Failed (<0.70): {failed}")
     if skipped:
-        print(f"跳过（无真值标注）{len(skipped)}：{', '.join(skipped)}")
+        print(f"Skipped (no label): {len(skipped)}: {', '.join(skipped)}")
 
     if output_csv:
         output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -128,16 +129,16 @@ def evaluate(images_dir: Path, labels_dir: Path, output_csv: Path | None) -> int
             writer.writerow({})
             writer.writerow({"image": "SUMMARY", "iou": round(mean_iou, 4),
                              "status": f"ok={ok}, partial={partial}, fail={failed}"})
-        print(f"评估结果已写入：{output_csv}")
+        print(f"Evaluation written to: {output_csv}")
 
     return 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="评估自动检测的 IoU 成功率")
+    parser = argparse.ArgumentParser(description="Evaluate auto-detection IoU success")
     parser.add_argument("--images", default=str(ROOT / "sample_data" / "images"))
     parser.add_argument("--labels", default=str(ROOT / "sample_data" / "labels"))
-    parser.add_argument("--out", default=None, help="可选：输出 CSV 路径")
+    parser.add_argument("--out", default=None, help="optional: output CSV path")
     args = parser.parse_args()
 
     output = Path(args.out) if args.out else None

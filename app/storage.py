@@ -1,7 +1,8 @@
-"""上传文件的登记表。
+"""Uploaded-file registry.
 
-图片以 uuid 作为 id 存在 data/uploads 下，元数据写入 data/manifest.json，
-这样后端重启后仍然能认出之前上传的图片。
+Images are stored under data/uploads keyed by uuid, with metadata
+persisted to data/manifest.json so previously uploaded files survive
+a backend restart.
 """
 
 from __future__ import annotations
@@ -53,7 +54,8 @@ class Store:
         with self._lock:
             self._save()
 
-    # 路径一律由 id + 受控扩展名拼出，不直接使用前端传来的路径
+    # Paths are always built from id + controlled extension, never from
+    # user-supplied paths.
     def file_path(self, record: dict) -> Path:
         return self.data_dir / "uploads" / f"{record['id']}{record['ext']}"
 

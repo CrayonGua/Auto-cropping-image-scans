@@ -1,6 +1,7 @@
-"""集中式配置。
+"""Centralized configuration.
 
-所有可调参数都放在项目根目录的 config.json，改参数不需要改代码。
+All tunable parameters live in config.json at the project root;
+tweaking them does not require changing any code.
 """
 
 from __future__ import annotations
@@ -41,14 +42,14 @@ DEFAULTS: dict[str, Any] = {
 
 
 def load_config() -> dict[str, Any]:
-    """读取 config.json，缺失的键回落到默认值。"""
+    """Load config.json; missing keys fall back to defaults."""
     cfg = copy.deepcopy(DEFAULTS)
     if not CONFIG_PATH.exists():
         return cfg
     try:
         raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"config.json 格式错误：{exc}") from exc
+        raise RuntimeError(f"Invalid config.json: {exc}") from exc
     for section, values in raw.items():
         if isinstance(values, dict) and isinstance(cfg.get(section), dict):
             cfg[section].update(values)

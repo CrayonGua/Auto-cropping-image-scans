@@ -5,5 +5,5 @@ opencv-python>=4.9
 numpy>=1.26
 pillow>=10.0
 
-# 仅用于 tools/smoke_test.py 的接口冒烟测试
+# only used by tools/smoke_test.py (HTTP smoke test)
 httpx>=0.27

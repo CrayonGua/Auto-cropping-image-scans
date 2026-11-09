@@ -1,1 +1,1 @@
-"""扫描件自动裁剪 —— 本地 Web 应用后端包。"""
+"""Auto-cropping of image scans — local web app backend package."""

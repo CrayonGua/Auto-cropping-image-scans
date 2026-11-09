@@ -1,10 +1,12 @@
-"""ROI 检测与透视裁剪（OpenCV 实现）。
+"""ROI detection and perspective cropping (OpenCV).
 
-整体思路（两条候选策略，取置信度高的结果）：
-    策略 A（底色差）：估计图片四周底色 -> 与底色差异大的区域 -> Otsu 二值化
-                     -> 形态学闭/开运算 -> 外轮廓 -> 四边形逼近
-    策略 B（边缘）：  Canny 边缘 -> 膨胀/闭运算把边连成闭环 -> 外轮廓 -> 四边形逼近
-策略 B 主要用来兜底“白底上的白卡片”这种策略 A 看不见的情况。
+Two candidate strategies run in parallel; we keep the highest-confidence result:
+    Strategy A (background diff): estimate the background color from the image
+        borders -> mask pixels far from it -> morphology -> outer contours ->
+        quadrilateral approximation.
+    Strategy B (edges): Canny edges -> dilate/close into loops -> outer contours
+        -> quadrilateral approximation. Used as a fallback for low-contrast
+        cases such as a white card on a white background that strategy A misses.
 """
 
 from __future__ import annotations
@@ -32,13 +34,14 @@ class Region:
         }
 
 
-# ---------------------------------------------------------------- 读写图片
+# ---------------------------------------------------------------- image I/O
 
 def load_bgr(path: str | Path) -> np.ndarray:
-    """用 Pillow 读图，顺带修正 EXIF 方向。
+    """Load an image as BGR using Pillow, applying EXIF orientation.
 
-    不用 cv2.imread 的原因：它读不了中文/非 ASCII 路径，也不处理 EXIF 旋转，
-    会导致“显示方向”和“坐标”错位。
+    cv2.imread is avoided on purpose: it cannot read non-ASCII paths
+    (e.g. Chinese filenames on Windows) and ignores EXIF rotation, which
+    would desync displayed orientation from pixel coordinates.
     """
     with Image.open(path) as im:
         im = ImageOps.exif_transpose(im)
@@ -49,10 +52,10 @@ def load_bgr(path: str | Path) -> np.ndarray:
 
 
 def save_png(path: str | Path, bgr: np.ndarray) -> None:
-    """cv2.imencode 配合 tofile 写入，兼容非 ASCII 路径。"""
+    """cv2.imencode + tofile so non-ASCII paths work."""
     ok, buf = cv2.imencode(".png", bgr)
     if not ok:
-        raise RuntimeError("PNG 编码失败")
+        raise RuntimeError("PNG encoding failed")
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     buf.tofile(str(path))
 
@@ -67,13 +70,13 @@ def fit_long_side(bgr: np.ndarray, max_side: int) -> np.ndarray:
     return cv2.resize(bgr, size, interpolation=cv2.INTER_AREA)
 
 
-# ---------------------------------------------------------------- 几何工具
+# ---------------------------------------------------------------- geometry
 
 def order_quad(points: np.ndarray | list) -> np.ndarray:
-    """把四个点整理成 左上 -> 右上 -> 右下 -> 左下。"""
+    """Order four points as top-left -> top-right -> bottom-right -> bottom-left."""
     pts = np.asarray(points, dtype=np.float32).reshape(-1, 2)
     if pts.shape[0] != 4:
-        raise ValueError("四边形必须正好 4 个点")
+        raise ValueError("A quadrilateral must have exactly 4 points")
     if len(np.unique(pts, axis=0)) < 4:
         center = pts.mean(axis=0)
         angles = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
@@ -110,7 +113,9 @@ def bbox_iou(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def dedupe(regions: list[Region]) -> list[Region]:
-    """同一张卡片常被两条策略各检一次，按包围盒重合度去重，保留置信度高的。"""
+    """Dedupe overlaps: the same card is often detected by both strategies.
+    Keep the highest-confidence candidate per overlapping bounding-box group.
+    """
     kept: list[Region] = []
     for region in sorted(regions, key=lambda r: -r.confidence):
         quad = np.asarray(region.quad, dtype=np.float32)
@@ -120,10 +125,10 @@ def dedupe(regions: list[Region]) -> list[Region]:
     return kept
 
 
-# ---------------------------------------------------------------- 检测主流程
+# ---------------------------------------------------------------- detection pipeline
 
 def detect(image_bgr: np.ndarray, cfg: dict[str, Any]) -> tuple[list[Region], str | None]:
-    """返回 (候选区域列表, 失败原因)。失败原因 None 表示检测成功。"""
+    """Return (candidate_regions, failure_reason). failure_reason is None on success."""
     original_h, original_w = image_bgr.shape[:2]
     max_side = int(cfg["detect_max_side"])
     scale = min(1.0, max_side / float(max(original_h, original_w)))
@@ -147,7 +152,8 @@ def detect(image_bgr: np.ndarray, cfg: dict[str, Any]) -> tuple[list[Region], st
         candidates += _from_gradient(gray, cfg)
 
     regions = dedupe(candidates)
-    # 坐标要还原到原图像素，后续裁剪一律在原分辨率的图上做
+    # Rescale coordinates back to the original image; cropping always runs
+    # at the original resolution.
     if scale != 1.0:
         for region in regions:
             region.quad = [[x / scale, y / scale] for x, y in region.quad]
@@ -184,12 +190,14 @@ def _from_background_diff(
     diff = np.abs(small.astype(np.float32) - background.reshape(1, 1, 3)).max(axis=2)
     diff = np.clip(diff, 0, 255).astype(np.uint8)
     diff = cv2.GaussianBlur(diff, (5, 5), 0)
-    # 底色和内容几乎同色时这条策略不可靠，交给边缘策略
+    # If the subject is nearly the same color as the background this strategy
+    # is unreliable; hand the case over to the edge strategy.
     if int(diff.max()) < 12:
         return []
 
-    # 阈值由“画面四周底色噪声”决定，而不是 Otsu：
-    # Otsu 在低对比度（白底白卡）时会把卡片内部误判为背景，导致只切到一小块。
+    # Threshold is derived from background noise at the image borders rather
+    # than Otsu: for low-contrast scenes (white card on white) Otsu tends to
+    # misclassify the card interior as background, yielding a tiny crop.
     threshold = _noise_threshold(diff, float(cfg["border_ratio"]))
     _, mask = cv2.threshold(diff, threshold, 255, cv2.THRESH_BINARY)
     k = int(cfg["close_kernel"])
@@ -204,7 +212,7 @@ def _from_background_diff(
 
 
 def _noise_threshold(diff: np.ndarray, border_ratio: float) -> float:
-    """用四周底色区域的噪声水平估算阈值：median + 2.5 * 稳健标准差。"""
+    """Estimate a threshold from border-noise statistics: median + 2.5 * robust sigma."""
     height, width = diff.shape[:2]
     band = max(4, int(min(height, width) * max(border_ratio, 0.03)))
     border = np.concatenate(
@@ -220,7 +228,9 @@ def _noise_threshold(diff: np.ndarray, border_ratio: float) -> float:
 
 
 def _from_gradient(gray: np.ndarray, cfg: dict[str, Any]) -> list[Region]:
-    """最后兜底：直接找强梯度并闭合成环，适合底色估计失效的场景。"""
+    """Final fallback: find strong gradients and close them into loops.
+    Useful when background estimation fails completely.
+    """
     gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
     magnitude = cv2.magnitude(gx, gy)
@@ -300,7 +310,8 @@ def _quad_from_contour(contour: np.ndarray) -> np.ndarray | None:
         approx = cv2.approxPolyDP(contour, float(eps) * perimeter, True)
         if len(approx) == 4 and cv2.isContourConvex(approx):
             return approx.reshape(4, 2).astype(np.float32)
-    # 退化为最小外接旋转矩形（轮廓边缘毛刺太多时的兜底）
+    # Fallback to the minimum-area rotated rectangle when the contour has
+    # too many jags to approximate cleanly.
     rect = cv2.minAreaRect(contour)
     if min(rect[1]) < 4:
         return None
@@ -308,7 +319,9 @@ def _quad_from_contour(contour: np.ndarray) -> np.ndarray | None:
 
 
 def _edge_support(gray: np.ndarray, quad: np.ndarray, samples: int = 40) -> float:
-    """沿四条边采样梯度强度，作为“这条边真的是物体边界”的置信度依据。"""
+    """Sample gradient strength along all four edges to score how likely
+    each edge is a real object boundary.
+    """
     gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
     magnitude = cv2.magnitude(gx, gy)
@@ -329,7 +342,7 @@ def _edge_support(gray: np.ndarray, quad: np.ndarray, samples: int = 40) -> floa
     return float(np.clip(0.5 * mean_score + 0.5 * median_score, 0.0, 1.0))
 
 
-# ---------------------------------------------------------------- 裁剪
+# ---------------------------------------------------------------- cropping
 
 def crop_region(
     image_bgr: np.ndarray,
@@ -338,7 +351,9 @@ def crop_region(
     rotate: int = 0,
     max_long_edge: int | None = None,
 ) -> np.ndarray:
-    """按四点做透视裁剪；inset_px 向内收缩，避免把背景带进来。"""
+    """Perspective crop by four points; inset_px shrinks the quad inward to
+    avoid leaking background into the result.
+    """
     height, width = image_bgr.shape[:2]
     q = order_quad(quad)
     q[:, 0] = np.clip(q[:, 0], 0, width - 1)
@@ -367,7 +382,7 @@ def crop_region(
     )
 
     if rotate:
-        k = -((int(rotate) // 90) % 4)  # 顺时针
+        k = -((int(rotate) // 90) % 4)  # clockwise
         if k:
             output = np.ascontiguousarray(np.rot90(output, k))
 

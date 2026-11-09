@@ -1,8 +1,8 @@
-"""FastAPI 应用：网页 + 检测接口 + 导出接口。
+"""FastAPI app: web UI + detection endpoints + export endpoints.
 
-启动方式（在项目根目录）：
+Start from the project root:
     python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-或直接双击 start.bat。
+or double-click start.bat.
 """
 
 from __future__ import annotations
@@ -32,13 +32,13 @@ CONFIG = load_config()
 STORE = Store(DATA_DIR)
 
 app = FastAPI(
-    title="扫描件自动裁剪",
-    description="自动识别扫描图中的照片/明信片并裁剪、矫正、批量导出。",
+    title="Auto Cropping of Image Scans",
+    description="Detect photos/postcards in scans and auto-crop, correct perspective, and export in batch.",
     version="0.1.0",
 )
 
 
-# ---------------------------------------------------------------- 请求模型
+# ---------------------------------------------------------------- request models
 
 class DetectIn(BaseModel):
     image_id: str
@@ -75,37 +75,37 @@ class ExportIn(BaseModel):
     options: ExportOptions
 
 
-# ---------------------------------------------------------------- 工具
+# ---------------------------------------------------------------- helpers
 
 def _record(image_id: str) -> dict:
     record = STORE.get(image_id)
     if record is None:
-        raise HTTPException(status_code=404, detail=f"找不到图片 id={image_id}")
+        raise HTTPException(status_code=404, detail=f"Image not found: id={image_id}")
     return record
 
 
 def _load_record_image(record: dict) -> np.ndarray:
     path = STORE.file_path(record)
     if not path.exists():
-        raise HTTPException(status_code=410, detail="图片文件已不存在，请重新上传")
+        raise HTTPException(status_code=410, detail="Image file is missing; please re-upload")
     try:
         return load_bgr(path)
-    except Exception as exc:  # 损坏的图片
-        raise HTTPException(status_code=400, detail=f"图片无法解码：{exc}") from exc
+    except Exception as exc:  # corrupt image
+        raise HTTPException(status_code=400, detail=f"Cannot decode image: {exc}") from exc
 
 
 def _validated_quad(quad: list[list[float]], width: int, height: int) -> np.ndarray:
     points = np.asarray(quad, dtype=np.float32)
     if points.shape != (4, 2):
-        raise HTTPException(status_code=400, detail="quad 必须是 4 个 [x, y] 点")
+        raise HTTPException(status_code=400, detail="quad must contain exactly 4 [x, y] points")
     if not np.isfinite(points).all():
-        raise HTTPException(status_code=400, detail="quad 含有非法数值")
+        raise HTTPException(status_code=400, detail="quad contains non-finite values")
     points[:, 0] = np.clip(points[:, 0], 0, width - 1)
     points[:, 1] = np.clip(points[:, 1], 0, height - 1)
     xs, ys = points[:, 0], points[:, 1]
     area = abs(float(np.dot(xs, np.roll(ys, -1)) - np.dot(ys, np.roll(xs, -1)))) / 2.0
     if area < 100:
-        raise HTTPException(status_code=400, detail="quad 面积过小，请重新框选")
+        raise HTTPException(status_code=400, detail="quad area too small; please redraw the box")
     return points
 
 
@@ -120,13 +120,13 @@ async def _read_limited(upload: UploadFile, limit_bytes: int) -> bytes:
         if total > limit_bytes:
             raise HTTPException(
                 status_code=400,
-                detail=f"{upload.filename} 超过 {limit_bytes // (1024 * 1024)}MB 限制",
+                detail=f"{upload.filename} exceeds the {limit_bytes // (1024 * 1024)}MB limit",
             )
         chunks.append(chunk)
     return b"".join(chunks)
 
 
-# ---------------------------------------------------------------- 接口
+# ---------------------------------------------------------------- endpoints
 
 @app.get("/api/health")
 def health() -> dict:
@@ -148,7 +148,7 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
     upload_cfg = CONFIG["upload"]
     if len(files) > int(upload_cfg["max_files"]):
         raise HTTPException(
-            status_code=400, detail=f"一次最多导入 {upload_cfg['max_files']} 张图片"
+            status_code=400, detail=f"Too many files; max is {upload_cfg['max_files']} per upload"
         )
     size_limit = int(upload_cfg["max_file_mb"]) * 1024 * 1024
     preview_side = int(upload_cfg["preview_max_side"])
@@ -159,7 +159,7 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
         name = Path(upload_file.filename or "").name
         suffix = Path(name).suffix.lower()
         if suffix not in allowed:
-            results.append({"name": name, "error": f"不支持的格式：{suffix or '未知'}"})
+            results.append({"name": name, "error": f"Unsupported format: {suffix or 'unknown'}"})
             continue
 
         try:
@@ -182,7 +182,7 @@ async def upload(files: list[UploadFile] = File(...)) -> dict:
             save_png(DATA_DIR / "previews" / f"{image_id}.png", preview_bgr)
         except Exception as exc:
             target.unlink(missing_ok=True)
-            results.append({"name": name, "error": f"图片无法解码：{exc}"})
+            results.append({"name": name, "error": f"Cannot decode image: {exc}"})
             continue
 
         record = {
@@ -251,7 +251,7 @@ def api_crop(payload: CropIn) -> dict:
 @app.post("/api/export")
 def api_export(payload: ExportIn) -> dict:
     if not payload.items:
-        raise HTTPException(status_code=400, detail="没有可导出的图片")
+        raise HTTPException(status_code=400, detail="No images to export")
 
     options = payload.options.model_dump()
     raw_dir = (options.get("output_dir") or "").strip()
@@ -259,7 +259,7 @@ def api_export(payload: ExportIn) -> dict:
         out_dir = Path(raw_dir).expanduser()
         if not out_dir.is_absolute():
             raise HTTPException(
-                status_code=400, detail="输出目录必须是绝对路径，例如 D:\\photo_archive"
+                status_code=400, detail=r"Output directory must be an absolute path, e.g. D:\photo_archive"
             )
     else:
         out_dir = DATA_DIR / "exports" / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -267,7 +267,7 @@ def api_export(payload: ExportIn) -> dict:
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise HTTPException(status_code=400, detail=f"无法创建输出目录：{exc}") from exc
+        raise HTTPException(status_code=400, detail=f"Cannot create output directory: {exc}") from exc
 
     inset_px = float(CONFIG["detector"]["inset_px"])
     files: list[dict] = []
@@ -294,7 +294,7 @@ def api_export(payload: ExportIn) -> dict:
             )
         except HTTPException as exc:
             errors.append({"image_id": item.image_id, "error": exc.detail})
-        except Exception as exc:  # 单张失败不影响其它图片
+        except Exception as exc:  # a single failure must not block the rest
             errors.append({"image_id": item.image_id, "error": str(exc)})
 
     return {
@@ -305,6 +305,6 @@ def api_export(payload: ExportIn) -> dict:
     }
 
 
-# 静态资源：/media 指向 data 目录（预览图、裁剪结果），/ 指向网页
+# Static: /media serves the data folder (previews, crops), / serves the web UI
 app.mount("/media", StaticFiles(directory=str(DATA_DIR)), name="media")
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

@@ -1,6 +1,6 @@
-"""导出阶段：降采样、水印、标签命名、写盘。
+"""Export stage: downsample, watermark, label naming, write to disk.
 
-所有导出选项都在这里集中处理，前端只负责把选项传进来。
+All export options are handled here; the front end just passes them through.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ POSITIONS = {
 }
 
 _FONT_CANDIDATES = [
-    r"C:\Windows\Fonts\msyh.ttc",      # 微软雅黑，支持中文
+    r"C:\Windows\Fonts\msyh.ttc",      # Microsoft YaHei, supports CJK
     r"C:\Windows\Fonts\msyhbd.ttc",
     r"C:\Windows\Fonts\simhei.ttf",
     "arial.ttf",
@@ -42,7 +42,7 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def downsample(image: Image.Image, max_long_edge: int) -> Image.Image:
-    """只缩小不放大，用 LANCZOS 保证质量。"""
+    """Only shrink, never upscale; LANCZOS keeps quality."""
     width, height = image.size
     longest = max(width, height)
     if max_long_edge <= 0 or longest <= max_long_edge:
@@ -84,7 +84,7 @@ def add_watermark(
         x = (width - text_w) // 2 - left
 
     alpha = int(255 * max(0.0, min(1.0, opacity)))
-    # 深色描边保证浅色照片上也看得清
+    # Dark stroke keeps the text readable on light photos
     for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2)):
         draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, alpha))
     draw.text((x, y), text, font=font, fill=(255, 255, 255, alpha))
@@ -140,7 +140,7 @@ def export_item(
     out_dir: Path,
     inset_px: float,
 ) -> dict[str, Any]:
-    """裁剪 -> 降采样 -> 水印 -> 按模板命名 -> 写盘 -> 可选 sidecar。"""
+    """Crop -> downsample -> watermark -> name by template -> write disk -> optional sidecar."""
     cropped = crop_region(
         image_bgr,
         quad,

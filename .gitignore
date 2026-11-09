@@ -6,16 +6,16 @@ venv/
 env/
 *.egg-info/
 
-# 运行时数据（上传、预览、裁剪中间图、导出成品）
+# runtime data (uploads, previews, crop intermediates, exports)
 data/
 
-# 编辑器
+# editor
 .vscode/
 .idea/
 
-# 系统文件
+# OS files
 .DS_Store
 Thumbs.db
 
-# 日志与临时文件
+# logs and temp files
 *.log
