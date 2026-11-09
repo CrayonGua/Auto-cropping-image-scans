@@ -1,1 +1,1 @@
-"""扫描件自动裁剪 —— 本地 Web 应用后端包。"""
+"""Local web application for reviewing and exporting image crops."""

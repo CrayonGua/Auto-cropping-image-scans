@@ -1,7 +1,4 @@
-"""集中式配置。
-
-所有可调参数都放在项目根目录的 config.json，改参数不需要改代码。
-"""
+"""Central configuration and defaults for the local application."""
 
 from __future__ import annotations
 
@@ -35,23 +32,25 @@ DEFAULTS: dict[str, Any] = {
     "export": {
         "default_format": "jpg",
         "default_quality": 92,
-        "write_sidecar": True,
+        "write_sidecar": False,
     },
 }
 
 
 def load_config() -> dict[str, Any]:
-    """读取 config.json，缺失的键回落到默认值。"""
-    cfg = copy.deepcopy(DEFAULTS)
+    """Load config.json and use defaults for any omitted settings."""
+    config = copy.deepcopy(DEFAULTS)
     if not CONFIG_PATH.exists():
-        return cfg
+        return config
     try:
         raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"config.json 格式错误：{exc}") from exc
+        raise RuntimeError(f"Invalid config.json: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise RuntimeError("Invalid config.json: the top-level value must be an object.")
     for section, values in raw.items():
-        if isinstance(values, dict) and isinstance(cfg.get(section), dict):
-            cfg[section].update(values)
+        if isinstance(values, dict) and isinstance(config.get(section), dict):
+            config[section].update(values)
         else:
-            cfg[section] = values
-    return cfg
+            config[section] = values
+    return config

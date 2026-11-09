@@ -1,22 +1,37 @@
 @echo off
-chcp 65001 >nul
+setlocal
 cd /d "%~dp0"
 
 echo ============================================
-echo   扫描件自动裁剪 - 本地启动
+echo   Auto Crop for Scans - Local Launcher
 echo ============================================
 
-python -m pip install -r requirements.txt --quiet
-if errorlevel 1 (
-    echo 依赖安装失败，请检查 Python 是否已加入 PATH。
-    pause
-    exit /b 1
+if not exist ".venv\Scripts\python.exe" (
+    where python >nul 2>&1
+    if errorlevel 1 (
+        echo Python was not found. Install Python 3.10 or later and add it to PATH.
+        pause
+        exit /b 1
+    )
+    echo Creating an isolated Python environment...
+    python -m venv .venv
+    if errorlevel 1 (
+        echo Could not create the virtual environment.
+        pause
+        exit /b 1
+    )
+    echo Installing project dependencies...
+    .venv\Scripts\python.exe -m pip install -r requirements.txt
+    if errorlevel 1 (
+        echo Dependency installation failed. Check your internet connection and Python setup.
+        pause
+        exit /b 1
+    )
 )
 
 start "" cmd /c "timeout /t 3 >nul & start http://127.0.0.1:8000/"
-
-echo 服务启动中，浏览器将自动打开 http://127.0.0.1:8000/
-echo 关闭本窗口即可停止服务。
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+echo Starting the local service at http://127.0.0.1:8000/
+echo Close this window or press Ctrl+C to stop the service.
+.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 pause

@@ -1,772 +1,110 @@
 'use strict';
-
-// ---------------------------------------------------------------- 状态
-
-const STATUS_TEXT = {
-  pending: '待检测',
-  detecting: '检测中…',
-  ok: '已检测',
-  failed: '需手动调整',
-  accepted: '已接受',
-  rejected: '已丢弃',
-  error: '导入失败',
-};
-
-const state = { items: [], selectedId: null };
-const view = { item: null, img: null, dragging: null, dragMode: null, moveStart: null };
-
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-
+const STATUS_TEXT = { pending:'Waiting for detection', detecting:'Detecting…', ok:'Ready to crop', failed:'Needs review', accepted:'Accepted', error:'Could not load' };
+const state = { items:[], selectedId:null, watermarkId:null, watermarkName:'', exported:false };
+const view = { item:null, img:null, dragging:null, dragMode:null, moveStart:null, previewTimer:null, previewController:null, previewUrl:null, previewSequence:0 };
+const canvas = document.getElementById('canvas'); const ctx = canvas.getContext('2d');
 const el = {
-  fileInput: document.getElementById('fileInput'),
-  fileList: document.getElementById('fileList'),
-  countBadge: document.getElementById('countBadge'),
-  editorTitle: document.getElementById('editorTitle'),
-  metaInfo: document.getElementById('metaInfo'),
-  regionChips: document.getElementById('regionChips'),
-  btnRedetect: document.getElementById('btnRedetect'),
-  btnRotate: document.getElementById('btnRotate'),
-  btnAccept: document.getElementById('btnAccept'),
-  btnReject: document.getElementById('btnReject'),
-  btnAcceptAll: document.getElementById('btnAcceptAll'),
-  btnClear: document.getElementById('btnClear'),
-  canvasWrap: document.getElementById('canvasWrap'),
-  emptyHint: document.getElementById('emptyHint'),
-  statusText: document.getElementById('statusText'),
-  cropPreview: document.getElementById('cropPreview'),
-  resultGrid: document.getElementById('resultGrid'),
-  resultCount: document.getElementById('resultCount'),
-  btnExport: document.getElementById('btnExport'),
-  exportStatus: document.getElementById('exportStatus'),
-  exportResult: document.getElementById('exportResult'),
-  optFormat: document.getElementById('optFormat'),
-  optQuality: document.getElementById('optQuality'),
-  qualityValue: document.getElementById('qualityValue'),
-  optMaxEdge: document.getElementById('optMaxEdge'),
-  optWmText: document.getElementById('optWmText'),
-  optWmPos: document.getElementById('optWmPos'),
-  optWmOpacity: document.getElementById('optWmOpacity'),
-  opacityValue: document.getElementById('opacityValue'),
-  optLabel: document.getElementById('optLabel'),
-  optTemplate: document.getElementById('optTemplate'),
-  optOutDir: document.getElementById('optOutDir'),
-  optSidecar: document.getElementById('optSidecar'),
+ fileInput:document.getElementById('fileInput'), fileList:document.getElementById('fileList'), countBadge:document.getElementById('countBadge'), queueSummary:document.getElementById('queueSummary'),
+ editorTitle:document.getElementById('editorTitle'), metaInfo:document.getElementById('metaInfo'), regionChips:document.getElementById('regionChips'),
+ btnRedetect:document.getElementById('btnRedetect'), btnRotateLeft:document.getElementById('btnRotateLeft'), btnRotateRight:document.getElementById('btnRotateRight'), btnFlipH:document.getElementById('btnFlipH'), btnFlipV:document.getElementById('btnFlipV'), btnAccept:document.getElementById('btnAccept'), btnReject:document.getElementById('btnReject'), btnAcceptAll:document.getElementById('btnAcceptAll'), btnClear:document.getElementById('btnClear'),
+ canvasWrap:document.getElementById('canvasWrap'), emptyHint:document.getElementById('emptyHint'), statusText:document.getElementById('statusText'),
+ livePreviewImage:document.getElementById('livePreviewImage'), previewPlaceholder:document.getElementById('previewPlaceholder'), previewCaption:document.getElementById('previewCaption'), previewDimensions:document.getElementById('previewDimensions'), previewState:document.getElementById('previewState'),
+ resultGrid:document.getElementById('resultGrid'), resultCount:document.getElementById('resultCount'), btnExport:document.getElementById('btnExport'), exportStatus:document.getElementById('exportStatus'), exportResult:document.getElementById('exportResult'),
+ optFormat:document.getElementById('optFormat'), optQuality:document.getElementById('optQuality'), qualityValue:document.getElementById('qualityValue'), optMaxEdge:document.getElementById('optMaxEdge'),
+ optWmEnabled:document.getElementById('optWmEnabled'), optWmText:document.getElementById('optWmText'), optWmFont:document.getElementById('optWmFont'), optWmStyle:document.getElementById('optWmStyle'), optWmColor:document.getElementById('optWmColor'), wmColorValue:document.getElementById('wmColorValue'), optWmPos:document.getElementById('optWmPos'), optWmSize:document.getElementById('optWmSize'), wmSizeValue:document.getElementById('wmSizeValue'), optWmOpacity:document.getElementById('optWmOpacity'), opacityValue:document.getElementById('opacityValue'),
+ watermarkInput:document.getElementById('watermarkInput'), watermarkFileName:document.getElementById('watermarkFileName'), btnClearWatermark:document.getElementById('btnClearWatermark'), textWatermarkFields:document.getElementById('textWatermarkFields'), imageWatermarkFields:document.getElementById('imageWatermarkFields'),
+ optLabel:document.getElementById('optLabel'), optTemplate:document.getElementById('optTemplate'), filenameExample:document.getElementById('filenameExample'), optOutDir:document.getElementById('optOutDir'), optSidecar:document.getElementById('optSidecar'), btnBrowseOutput:document.getElementById('btnBrowseOutput')
 };
+function setStatus(text,kind){el.statusText.textContent=text||'';el.statusText.className=`status${kind?` ${kind}`:''}`;}
+function setExportStatus(text,kind){el.exportStatus.textContent=text||'';el.exportStatus.className=`status${kind?` ${kind}`:''}`;}
+async function api(path,body){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let data={};try{data=await response.json();}catch(error){data={};}if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:`Request failed (${response.status})`);return data;}
+function clamp(value,min,max){return Math.min(max,Math.max(min,value));}
+function pixelScale(){const width=canvas.getBoundingClientRect().width||1;return canvas.width?canvas.width/width:1;}
+function defaultQuad(item){const w=item.width||1000,h=item.height||1000,px=Math.round(w*.15),py=Math.round(h*.15);return [[px,py],[w-px,py],[w-px,h-py],[px,h-py]];}
+function selectedWatermarkType(){return document.querySelector('input[name="watermarkType"]:checked')?.value||'text';}
+function isWatermarkEnabled(){return !el.optWmEnabled.checked;}
+function updateWorkflow(){const steps=[...document.querySelectorAll('.workflow-step')];let current=state.items.length?(view.item?.quad?(view.item.status==='accepted'?2:1):0):0;if(state.exported)current=3;steps.forEach((step,index)=>{step.classList.toggle('active',index===current);step.classList.toggle('done',index<current);});}
+function syncEditorControls(){updateWorkflow();const item=view.item,ready=!!item&&!!item.quad&&item.status!=='error';el.btnRedetect.disabled=!item?.url||item.status==='detecting';el.btnRotateLeft.disabled=!ready;el.btnRotateRight.disabled=!ready;el.btnFlipH.disabled=!ready;el.btnFlipV.disabled=!ready;el.btnFlipH.classList.toggle('selected',!!item?.flipH);el.btnFlipV.classList.toggle('selected',!!item?.flipV);el.btnFlipH.setAttribute('aria-pressed',String(!!item?.flipH));el.btnFlipV.setAttribute('aria-pressed',String(!!item?.flipV));el.btnAccept.disabled=!ready;el.btnReject.disabled=!item;el.btnAccept.innerHTML=item?.status==='accepted'?'Update Crop <span>→</span>':'Accept Crop <span>→</span>';el.btnAcceptAll.disabled=!state.items.some(entry=>entry.quad&&entry.status!=='error');}
 
-// ---------------------------------------------------------------- 基础工具
-
-function setStatus(text, kind) {
-  el.statusText.textContent = text || '';
-  el.statusText.className = 'status' + (kind ? ' ' + kind : '');
+// New uploads are prepended, while their order inside each batch stays intact.
+function renderList(){
+ el.fileList.innerHTML='';el.countBadge.textContent=String(state.items.length);const accepted=state.items.filter(i=>i.status==='accepted').length;
+ el.queueSummary.textContent=state.items.length?`${accepted} accepted · ${state.items.length} total`:'Add scans to begin';
+ if(!state.items.length){const empty=document.createElement('div');empty.className='queue-empty';empty.innerHTML='<span class="empty-plus" aria-hidden="true">＋</span><strong>Your queue is empty</strong><span>Add or drop scanned images to start cropping.</span>';el.fileList.appendChild(empty);syncEditorControls();return;}
+ state.items.forEach(item=>{const row=document.createElement('div');row.className=`file-item${item.id===state.selectedId?' active':''}`;row.dataset.status=item.status;
+  const thumb=document.createElement('img');thumb.className='file-thumb';thumb.alt='';if(item.url)thumb.src=item.url;
+  const main=document.createElement('div');main.className='file-main';const name=document.createElement('div');name.className='file-name';name.textContent=item.name;name.title=item.name;
+  const statusRow=document.createElement('div');statusRow.className='file-status-row';const status=document.createElement('span');status.className='file-state';status.textContent=item.status==='accepted'?(item.edited?'Accepted · edited':'Accepted'):(item.error||STATUS_TEXT[item.status]||item.status);statusRow.appendChild(status);
+  if(item.edited){const badge=document.createElement('span');badge.className='edit-badge';badge.textContent='EDITED';statusRow.appendChild(badge);}main.append(name,statusRow);const dot=document.createElement('span');dot.className='dot';row.append(thumb,main,dot);row.addEventListener('click',()=>selectItem(item.id));el.fileList.appendChild(row);
+ });syncEditorControls();
 }
-
-function setExportStatus(text, kind) {
-  el.exportStatus.textContent = text || '';
-  el.exportStatus.className = 'status' + (kind ? ' ' + kind : '');
+function setPreviewPlaceholder(title,detail){el.livePreviewImage.hidden=true;el.previewPlaceholder.hidden=false;el.previewPlaceholder.querySelector('strong').textContent=title;el.previewPlaceholder.querySelector('span:last-child').textContent=detail||'';el.previewCaption.textContent=title;el.previewDimensions.textContent='';el.previewState.classList.remove('busy');}
+function clearPreviewUrl(){if(view.previewUrl)URL.revokeObjectURL(view.previewUrl);view.previewUrl=null;}
+function selectItem(id){
+ const item=state.items.find(entry=>entry.id===id);if(!item)return;state.selectedId=id;view.item=item;view.img=null;view.dragMode=null;canvas.style.display='none';el.emptyHint.hidden=!item.url;
+ renderList();syncEditorControls();el.editorTitle.textContent=item.name||'Ready to edit';updateFilenameExample();updateMeta();renderChips();
+ if(!item.url){setStatus(item.error||'This image could not be loaded.','error');setPreviewPlaceholder('Preview unavailable','The selected file could not be decoded.');return;}
+ setStatus(item.status==='accepted'?'Accepted crop selected. Adjustments update the output preview.':'Adjust the crop, then accept it to add it to the export set.');loadPreview(item);scheduleLivePreview(item);
 }
-
-async function api(path, body) {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  let data = {};
-  try { data = await response.json(); } catch (error) { data = {}; }
-  if (!response.ok) {
-    const detail = data.detail;
-    throw new Error(typeof detail === 'string' ? detail : `请求失败（${response.status}）`);
-  }
-  return data;
+function loadPreview(item){const image=new Image();image.onload=()=>{if(state.selectedId!==item.id)return;view.img=image;canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.style.display='block';el.emptyHint.hidden=true;drawCanvas();updateMeta();};image.onerror=()=>{if(state.selectedId===item.id)setStatus('Could not load the image preview.','error');};image.src=item.url;}
+function updateMeta(){const item=view.item;if(!item){el.metaInfo.textContent='';return;}const parts=[];if(item.width)parts.push(`${item.width} × ${item.height}`);if(typeof item.confidence==='number')parts.push(`${Math.round(item.confidence*100)}% confidence`);if(item.detectMs!=null)parts.push(`${item.detectMs} ms detection`);if(item.reason==='no_region')parts.push('No boundary found — adjust manually');if(item.reason==='low_confidence')parts.push('Low confidence — review corners');if(item.edited)parts.push('Edited');if(item.rotate)parts.push(item.rotate===90?'Rotate Right 90°':item.rotate===270?'Rotate Left 90°':`Rotate ${item.rotate}°`);if(item.flipH)parts.push('Flip H');if(item.flipV)parts.push('Flip V');el.metaInfo.textContent=parts.join(' · ');}
+function renderChips(){el.regionChips.innerHTML='';const item=view.item;if(!item?.regions||item.regions.length<2)return;item.regions.forEach((region,index)=>{const chip=document.createElement('button');chip.type='button';chip.className=`chip${item.regionIndex===index?' active':''}`;chip.textContent=`Option ${index+1}`;chip.addEventListener('click',()=>{item.quad=region.quad.map(([x,y])=>[Number(x),Number(y)]);item.confidence=region.confidence;item.regionIndex=index;item.edited=true;resetAcceptedState(item);state.exported=false;drawCanvas();renderChips();renderList();updateMeta();scheduleLivePreview(item);});el.regionChips.appendChild(chip);});}
+function drawCanvas(){
+ const item=view.item;if(view.img){const w=view.img.naturalWidth,h=view.img.naturalHeight;if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(view.img,0,0,canvas.width,canvas.height);}
+ if(!item?.quad||!view.img)return;const scale=canvas.width/item.width,points=item.quad.map(([x,y])=>[x*scale,y*scale]),dpr=pixelScale();ctx.beginPath();points.forEach(([x,y],i)=>{if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});ctx.closePath();ctx.fillStyle='rgba(40,104,220,.13)';ctx.fill();ctx.lineWidth=Math.max(1.5,2*dpr);ctx.strokeStyle='#2868dc';ctx.stroke();
+ const radius=Math.max(4,7*dpr);points.forEach(([x,y],i)=>{ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=Math.max(1.5,2*dpr);ctx.strokeStyle='#2868dc';ctx.stroke();ctx.fillStyle='#174ca9';ctx.font=`700 ${Math.max(10,11*dpr)}px "Segoe UI",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(i+1),x,y+radius*1.9);});
 }
+function canvasPoint(event){const r=canvas.getBoundingClientRect();return[(event.clientX-r.left)*(canvas.width/r.width),(event.clientY-r.top)*(canvas.height/r.height)];}
+function toOriginal(point){return[point[0]/(canvas.width/view.item.width),point[1]/(canvas.width/view.item.width)];}
+function nearestHandle(point){const item=view.item;if(!item?.quad)return-1;const scale=canvas.width/item.width,threshold=Math.max(6,14*pixelScale());let best=-1,dmin=Infinity;item.quad.forEach(([x,y],i)=>{const d=Math.hypot(x*scale-point[0],y*scale-point[1]);if(d<threshold&&d<dmin){best=i;dmin=d;}});return best;}
+function pointInQuad(point){const item=view.item;if(!item?.quad)return false;const s=canvas.width/item.width,p=item.quad.map(([x,y])=>[x*s,y*s]);let inside=false;for(let i=0,j=p.length-1;i<p.length;j=i++){const[xi,yi]=p[i],[xj,yj]=p[j];const hit=(yi>point[1])!==(yj>point[1])&&point[0]<((xj-xi)*(point[1]-yi))/(yj-yi+1e-9)+xi;if(hit)inside=!inside;}return inside;}
+function resetAcceptedState(item){if(!item||item.status!=='accepted')return;item.status='ok';item.cropUrl=null;item.cropW=0;item.cropH=0;renderResults();}
+canvas.addEventListener('pointerdown',event=>{const item=view.item;if(!item?.quad)return;const point=canvasPoint(event),handle=nearestHandle(point);if(handle>=0){view.dragMode='corner';view.dragging=handle;}else if(pointInQuad(point)){view.dragMode='move';view.moveStart={point:toOriginal(point),quad:item.quad.map(([x,y])=>[x,y])};}else return;resetAcceptedState(item);canvas.setPointerCapture(event.pointerId);event.preventDefault();});
+canvas.addEventListener('pointermove',event=>{const item=view.item;if(!item||!view.dragMode)return;const[x,y]=toOriginal(canvasPoint(event));if(view.dragMode==='corner')item.quad[view.dragging]=[clamp(x,0,item.width-1),clamp(y,0,item.height-1)];else if(view.dragMode==='move'&&view.moveStart){const start=view.moveStart,xs=start.quad.map(([px])=>px),ys=start.quad.map(([,py])=>py),dx=clamp(x-start.point[0],-Math.min(...xs),item.width-1-Math.max(...xs)),dy=clamp(y-start.point[1],-Math.min(...ys),item.height-1-Math.max(...ys));item.quad=start.quad.map(([px,py])=>[px+dx,py+dy]);}else return;item.edited=true;state.exported=false;drawCanvas();updateMeta();scheduleLivePreview(item);});
+function endDrag(event){if(!view.dragMode)return;view.dragMode=null;view.dragging=null;view.moveStart=null;if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);renderList();}
+canvas.addEventListener('pointerup',endDrag);canvas.addEventListener('pointercancel',endDrag);
 
-function clamp(value, minimum, maximum) {
-  return Math.min(maximum, Math.max(minimum, value));
+function watermarkPreviewOptions(){const enabled=isWatermarkEnabled(),type=selectedWatermarkType();return{watermark_enabled:enabled,watermark_type:type,watermark_text:type==='text'?el.optWmText.value:'',watermark_image_id:type==='image'?state.watermarkId:null,watermark_position:el.optWmPos.value,watermark_opacity:Number(el.optWmOpacity.value)/100,watermark_size_ratio:Number(el.optWmSize.value)/100,watermark_color:el.optWmColor.value,watermark_font:el.optWmFont.value,watermark_style:el.optWmStyle.value};}
+function scheduleLivePreview(item=view.item){if(view.previewTimer)clearTimeout(view.previewTimer);if(!item?.url||!item.quad){setPreviewPlaceholder(item?.url?'Detecting crop area':'Preview appears here','Adjust a crop to see the finished image.');return;}view.previewTimer=setTimeout(()=>renderLivePreview(item),view.dragMode?180:90);}
+async function renderLivePreview(item){
+ if(state.selectedId!==item.id||!item.quad)return;if(view.previewController)view.previewController.abort();const controller=new AbortController();view.previewController=controller;const sequence=++view.previewSequence;
+ el.previewPlaceholder.hidden=false;el.previewPlaceholder.querySelector('strong').textContent='Updating preview…';el.previewPlaceholder.querySelector('span:last-child').textContent='Rendering crop and watermark settings.';el.livePreviewImage.hidden=true;el.previewState.classList.add('busy');el.previewCaption.textContent=item.name;
+ try{const response=await fetch('/api/preview',{method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,body:JSON.stringify({image_id:item.id,quad:item.quad,rotate:item.rotate||0,flip_h:!!item.flipH,flip_v:!!item.flipV,...watermarkPreviewOptions()})});if(!response.ok){let data={};try{data=await response.json();}catch(error){data={};}throw new Error(typeof data.detail==='string'?data.detail:`Preview failed (${response.status})`);}const blob=await response.blob();if(sequence!==view.previewSequence||state.selectedId!==item.id)return;clearPreviewUrl();view.previewUrl=URL.createObjectURL(blob);el.livePreviewImage.src=view.previewUrl;el.livePreviewImage.alt=`Live crop preview of ${item.name}`;el.livePreviewImage.hidden=false;el.previewPlaceholder.hidden=true;el.previewCaption.textContent=`${item.name}${item.edited?' · edited':''}`;el.previewDimensions.textContent=response.headers.get('X-Preview-Size')||'';el.previewState.classList.remove('busy');}
+ catch(error){if(error.name==='AbortError'||sequence!==view.previewSequence)return;el.previewState.classList.remove('busy');setPreviewPlaceholder('Preview unavailable',error.message);}
 }
-
-function pixelScale() {
-  const width = canvas.getBoundingClientRect().width || 1;
-  return canvas.width ? canvas.width / width : 1;
+async function uploadFiles(fileList){
+ const files=Array.from(fileList||[]).filter(Boolean);if(!files.length)return;setStatus(`Adding ${files.length} image${files.length===1?'':'s'}…`);const form=new FormData();files.forEach(file=>form.append('files',file));let data;
+ try{const response=await fetch('/api/upload',{method:'POST',body:form});data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not add these images.');}catch(error){setStatus(`Could not add images: ${error.message}`,'error');return;}
+ const added=(data.items||[]).map(entry=>({id:entry.id||`invalid-${Math.random().toString(36).slice(2,8)}`,name:entry.name||'Unnamed image',url:entry.url||null,width:entry.width||0,height:entry.height||0,status:entry.error?'error':'pending',error:entry.error||null,quad:null,regions:[],regionIndex:0,confidence:null,detectMs:null,reason:null,rotate:0,flipH:false,flipV:false,cropUrl:null,cropW:0,cropH:0,edited:false}));
+ state.items=[...added,...state.items];state.exported=false;renderList();renderResults();if(added.length)selectItem(added[0].id);const ready=added.filter(item=>item.status!=='error');
+ for(let i=0;i<ready.length;i++){setStatus(`Detecting ${i+1} of ${ready.length} new image${ready.length===1?'':'s'}…`);await detectItem(ready[i],true);}setStatus(ready.length?`${ready.length} image${ready.length===1?'':'s'} added. Select a crop to review.`:'No valid images were added.',ready.length?'ok':'error');
 }
-
-function defaultQuad(item) {
-  const width = item.width || 1000;
-  const height = item.height || 1000;
-  const padX = Math.round(width * 0.15);
-  const padY = Math.round(height * 0.15);
-  return [
-    [padX, padY],
-    [width - padX, padY],
-    [width - padX, height - padY],
-    [padX, height - padY],
-  ];
-}
-
-// ---------------------------------------------------------------- 列表渲染
-
-function renderList() {
-  el.fileList.innerHTML = '';
-  el.countBadge.textContent = String(state.items.length);
-
-  if (!state.items.length) {
-    const placeholder = document.createElement('p');
-    placeholder.className = 'placeholder';
-    placeholder.textContent = '还没有导入图片';
-    el.fileList.appendChild(placeholder);
-    return;
-  }
-
-  state.items.forEach((item) => {
-    const row = document.createElement('div');
-    row.className = 'file-item' + (item.id === state.selectedId ? ' active' : '');
-    row.dataset.status = item.status;
-
-    const thumb = document.createElement('img');
-    thumb.className = 'file-thumb';
-    thumb.alt = '';
-    if (item.url) thumb.src = item.url;
-
-    const main = document.createElement('div');
-    main.className = 'file-main';
-
-    const name = document.createElement('div');
-    name.className = 'file-name';
-    name.textContent = item.name;
-    name.title = item.name;
-
-    const status = document.createElement('div');
-    status.className = 'file-state';
-    status.textContent = STATUS_TEXT[item.status] || item.status;
-    if (item.status === 'accepted' && item.cropW) {
-      status.textContent += ` · ${item.cropW}×${item.cropH}`;
-    }
-
-    main.appendChild(name);
-    main.appendChild(status);
-
-    const dot = document.createElement('span');
-    dot.className = 'dot';
-
-    row.appendChild(thumb);
-    row.appendChild(main);
-    row.appendChild(dot);
-    row.addEventListener('click', () => selectItem(item.id));
-    el.fileList.appendChild(row);
-  });
-}
-
-// ---------------------------------------------------------------- 选择与预览
-
-function selectItem(id) {
-  const item = state.items.find((entry) => entry.id === id);
-  if (!item) return;
-  state.selectedId = id;
-  view.item = item;
-  renderList();
-  el.editorTitle.textContent = item.name;
-  el.cropPreview.innerHTML = '';
-  updateMeta();
-  renderChips();
-
-  if (!item.url) {
-    view.img = null;
-    canvas.style.display = 'none';
-    el.emptyHint.hidden = item.status !== 'error';
-    setStatus(item.error || '该图片导入失败', 'error');
-    return;
-  }
-
-  if (item.cropUrl) showCropPreview(item);
-  loadPreview(item);
-}
-
-function loadPreview(item) {
-  const image = new Image();
-  image.onload = () => {
-    view.img = image;
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    canvas.style.display = 'block';
-    el.emptyHint.hidden = true;
-    drawCanvas();
-    updateMeta();
-  };
-  image.onerror = () => setStatus('预览图加载失败', 'error');
-  image.src = item.url;
-}
-
-function showCropPreview(item) {
-  el.cropPreview.innerHTML = '';
-  const image = document.createElement('img');
-  image.src = item.cropUrl;
-  image.alt = '裁剪结果';
-  const caption = document.createElement('span');
-  caption.textContent = item.cropW ? `成品 ${item.cropW}×${item.cropH}` : '成品';
-  el.cropPreview.appendChild(image);
-  el.cropPreview.appendChild(caption);
-}
-
-function updateMeta() {
-  const item = view.item;
-  if (!item) {
-    el.metaInfo.textContent = '';
-    return;
-  }
-  const parts = [];
-  if (item.width) parts.push(`${item.width}×${item.height}`);
-  if (typeof item.confidence === 'number') parts.push(`置信度 ${(item.confidence * 100).toFixed(0)}%`);
-  if (item.detectMs != null) parts.push(`检测 ${item.detectMs}ms`);
-  if (item.reason === 'no_region') parts.push('未找到区域，请手动框选');
-  if (item.reason === 'low_confidence') parts.push('置信度偏低，建议检查四角');
-  if (item.edited) parts.push('已手动调整');
-  if (item.rotate) parts.push(`输出旋转 ${item.rotate}°`);
-  el.metaInfo.textContent = parts.join(' · ');
-}
-
-function renderChips() {
-  el.regionChips.innerHTML = '';
-  const item = view.item;
-  if (!item || !item.regions || item.regions.length < 2) return;
-  item.regions.forEach((region, index) => {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip' + (item.regionIndex === index ? ' active' : '');
-    chip.textContent = `区域 ${index + 1}`;
-    chip.addEventListener('click', () => {
-      item.quad = region.quad.map(([x, y]) => [Number(x), Number(y)]);
-      item.confidence = region.confidence;
-      item.regionIndex = index;
-      item.edited = true;
-      resetAcceptedState(item);
-      drawCanvas();
-      renderChips();
-      renderList();
-      updateMeta();
-    });
-    el.regionChips.appendChild(chip);
-  });
-}
-
-// ---------------------------------------------------------------- 画布绘制
-
-function drawCanvas() {
-  const item = view.item;
-  if (view.img) {
-    const width = view.img.naturalWidth;
-    const height = view.img.naturalHeight;
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
-    }
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(view.img, 0, 0, canvas.width, canvas.height);
-  }
-
-  if (!item || !item.quad || !view.img) return;
-
-  const scale = canvas.width / item.width;
-  const points = item.quad.map(([x, y]) => [x * scale, y * scale]);
-  const dpr = pixelScale();
-
-  ctx.beginPath();
-  points.forEach(([x, y], index) => {
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(37, 99, 235, 0.10)';
-  ctx.fill();
-  ctx.lineWidth = Math.max(1.5, 2 * dpr);
-  ctx.strokeStyle = '#2563eb';
-  ctx.stroke();
-
-  const radius = Math.max(4, 7 * dpr);
-  points.forEach(([x, y], index) => {
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
-    ctx.lineWidth = Math.max(1.5, 2 * dpr);
-    ctx.strokeStyle = '#2563eb';
-    ctx.stroke();
-
-    ctx.fillStyle = '#2563eb';
-    ctx.font = `${Math.max(10, 11 * dpr)}px "Segoe UI", "Microsoft YaHei", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(String(index + 1), x, y + radius * 1.9);
-  });
-}
-
-// ---------------------------------------------------------------- 拖拽
-
-function canvasPoint(event) {
-  const rect = canvas.getBoundingClientRect();
-  return [
-    (event.clientX - rect.left) * (canvas.width / rect.width),
-    (event.clientY - rect.top) * (canvas.height / rect.height),
-  ];
-}
-
-function toOriginal(point) {
-  const scale = canvas.width / view.item.width;
-  return [point[0] / scale, point[1] / scale];
-}
-
-function nearestHandle(point) {
-  const item = view.item;
-  if (!item || !item.quad) return -1;
-  const scale = canvas.width / item.width;
-  const threshold = Math.max(6, 14 * pixelScale());
-  let best = -1;
-  let bestDistance = Infinity;
-  item.quad.forEach(([x, y], index) => {
-    const distance = Math.hypot(x * scale - point[0], y * scale - point[1]);
-    if (distance < threshold && distance < bestDistance) {
-      best = index;
-      bestDistance = distance;
-    }
-  });
-  return best;
-}
-
-function pointInQuad(point) {
-  const item = view.item;
-  if (!item || !item.quad) return false;
-  const scale = canvas.width / item.width;
-  const polygon = item.quad.map(([x, y]) => [x * scale, y * scale]);
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const [xi, yi] = polygon[i];
-    const [xj, yj] = polygon[j];
-    const intersects = (yi > point[1]) !== (yj > point[1])
-      && point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi + 1e-9) + xi;
-    if (intersects) inside = !inside;
-  }
-  return inside;
-}
-
-function resetAcceptedState(item) {
-  if (!item || item.status !== 'accepted') return;
-  item.status = 'ok';
-  item.cropUrl = null;
-  item.cropW = 0;
-  item.cropH = 0;
-  el.cropPreview.innerHTML = '';
-  renderResults();
-}
-
-canvas.addEventListener('pointerdown', (event) => {
-  const item = view.item;
-  if (!item || !item.quad) return;
-  const point = canvasPoint(event);
-  const handle = nearestHandle(point);
-
-  if (handle >= 0) {
-    view.dragMode = 'corner';
-    view.dragging = handle;
-  } else if (pointInQuad(point)) {
-    view.dragMode = 'move';
-    view.moveStart = {
-      point: toOriginal(point),
-      quad: item.quad.map(([x, y]) => [x, y]),
-    };
-  } else {
-    return;
-  }
-
-  resetAcceptedState(item);
-  canvas.setPointerCapture(event.pointerId);
-  event.preventDefault();
-});
-
-canvas.addEventListener('pointermove', (event) => {
-  const item = view.item;
-  if (!item || !view.dragMode) return;
-  const point = canvasPoint(event);
-  const [x, y] = toOriginal(point);
-
-  if (view.dragMode === 'corner') {
-    item.quad[view.dragging] = [
-      clamp(x, 0, item.width - 1),
-      clamp(y, 0, item.height - 1),
-    ];
-  } else if (view.dragMode === 'move' && view.moveStart) {
-    const start = view.moveStart;
-    const xs = start.quad.map(([px]) => px);
-    const ys = start.quad.map(([, py]) => py);
-    let dx = x - start.point[0];
-    let dy = y - start.point[1];
-    dx = clamp(dx, -Math.min(...xs), item.width - 1 - Math.max(...xs));
-    dy = clamp(dy, -Math.min(...ys), item.height - 1 - Math.max(...ys));
-    item.quad = start.quad.map(([px, py]) => [px + dx, py + dy]);
-  } else {
-    return;
-  }
-
-  item.edited = true;
-  drawCanvas();
-  updateMeta();
-});
-
-function endDrag(event) {
-  if (!view.dragMode) return;
-  view.dragMode = null;
-  view.dragging = null;
-  view.moveStart = null;
-  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-  renderList();
-}
-
-canvas.addEventListener('pointerup', endDrag);
-canvas.addEventListener('pointercancel', endDrag);
-
-// ---------------------------------------------------------------- 上传与检测
-
-async function uploadFiles(fileList) {
-  const files = Array.from(fileList || []).filter(Boolean);
-  if (!files.length) return;
-
-  setStatus(`正在导入 ${files.length} 张图片…`);
-  const form = new FormData();
-  files.forEach((file) => form.append('files', file));
-
-  let data;
-  try {
-    const response = await fetch('/api/upload', { method: 'POST', body: form });
-    data = await response.json();
-    if (!response.ok) throw new Error(data.detail || '导入失败');
-  } catch (error) {
-    setStatus(`导入失败：${error.message}`, 'error');
-    return;
-  }
-
-  const newItems = [];
-  (data.items || []).forEach((entry) => {
-    const item = {
-      id: entry.id || `invalid-${Math.random().toString(36).slice(2, 8)}`,
-      name: entry.name,
-      url: entry.url || null,
-      width: entry.width || 0,
-      height: entry.height || 0,
-      status: entry.error ? 'error' : 'pending',
-      error: entry.error || null,
-      quad: null,
-      regions: [],
-      regionIndex: 0,
-      confidence: null,
-      detectMs: null,
-      reason: null,
-      rotate: 0,
-      cropUrl: null,
-      cropW: 0,
-      cropH: 0,
-      edited: false,
-    };
-    state.items.push(item);
-    if (!entry.error) newItems.push(item);
-  });
-
-  renderList();
-  if (!state.selectedId && state.items.length) selectItem(state.items[0].id);
-
-  for (let index = 0; index < newItems.length; index += 1) {
-    setStatus(`正在检测 ${index + 1}/${newItems.length}…`);
-    await detectItem(newItems[index], true);
-  }
-  setStatus(newItems.length ? `自动检测完成（${newItems.length} 张）` : '没有可检测的图片',
-    newItems.length ? 'ok' : 'error');
-}
-
-async function detectItem(item, quiet) {
-  if (!item || !item.id || item.status === 'error') return;
-  item.status = 'detecting';
-  item.reason = null;
-  item.cropUrl = null;
-  renderList();
-
-  try {
-    const data = await api('/api/detect', { image_id: item.id });
-    item.regions = data.regions || [];
-    item.reason = data.reason;
-    item.detectMs = data.detect_ms;
-    item.regionIndex = 0;
-
-    if (item.regions.length) {
-      item.quad = item.regions[0].quad.map(([x, y]) => [Number(x), Number(y)]);
-      item.confidence = item.regions[0].confidence;
-      item.status = data.status === 'ok' ? 'ok' : 'failed';
-    } else {
-      item.quad = defaultQuad(item);
-      item.confidence = null;
-      item.status = 'failed';
-    }
-    item.edited = false;
-    if (!quiet) {
-      setStatus(item.status === 'ok' ? '检测成功，可拖拽四角微调' : '未能可靠检测，已给出初始框，请手动调整',
-        item.status === 'ok' ? 'ok' : 'error');
-    }
-  } catch (error) {
-    item.status = 'failed';
-    item.reason = 'error';
-    item.quad = defaultQuad(item);
-    setStatus(`检测失败：${error.message}`, 'error');
-  }
-
-  renderList();
-  renderResults();
-  if (state.selectedId === item.id) {
-    drawCanvas();
-    updateMeta();
-    renderChips();
-  }
-}
-
-// ---------------------------------------------------------------- 接受 / 丢弃
-
-async function acceptItem(item, quiet) {
-  if (!item || !item.quad || item.status === 'error') return false;
-  try {
-    const data = await api('/api/crop', {
-      image_id: item.id,
-      quad: item.quad,
-      rotate: item.rotate || 0,
-    });
-    item.cropUrl = data.url;
-    item.cropW = data.width;
-    item.cropH = data.height;
-    item.status = 'accepted';
-    renderList();
-    renderResults();
-    if (state.selectedId === item.id) showCropPreview(item);
-    if (!quiet) setStatus(`已接受：${item.name}`, 'ok');
-    return true;
-  } catch (error) {
-    setStatus(`裁剪失败：${error.message}`, 'error');
-    return false;
-  }
-}
-
-function renderResults() {
-  const accepted = state.items.filter((item) => item.status === 'accepted' && item.cropUrl);
-  el.resultCount.textContent = String(accepted.length);
-  el.resultGrid.innerHTML = '';
-
-  if (!accepted.length) {
-    const placeholder = document.createElement('p');
-    placeholder.className = 'placeholder';
-    placeholder.textContent = '点击“接受本图”后，成品会出现在这里';
-    el.resultGrid.appendChild(placeholder);
-    return;
-  }
-
-  accepted.forEach((item) => {
-    const card = document.createElement('div');
-    card.className = 'result-card';
-    const image = document.createElement('img');
-    image.src = item.cropUrl;
-    image.alt = item.name;
-    image.title = '点击回到该图继续调整';
-    image.addEventListener('click', () => selectItem(item.id));
-
-    const caption = document.createElement('div');
-    caption.className = 'cap';
-    const title = document.createElement('strong');
-    title.textContent = item.name;
-    title.title = item.name;
-    const size = document.createElement('span');
-    size.textContent = `${item.cropW}×${item.cropH}`;
-    caption.appendChild(title);
-    caption.appendChild(size);
-
-    card.appendChild(image);
-    card.appendChild(caption);
-    el.resultGrid.appendChild(card);
-  });
-}
-
-// ---------------------------------------------------------------- 导出
-
-function readExportOptions() {
-  const maxEdgeRaw = el.optMaxEdge.value.trim();
-  return {
-    fmt: el.optFormat.value,
-    quality: Number(el.optQuality.value),
-    max_long_edge: maxEdgeRaw ? Number(maxEdgeRaw) : null,
-    watermark_text: el.optWmText.value,
-    watermark_position: el.optWmPos.value,
-    watermark_opacity: Number(el.optWmOpacity.value) / 100,
-    watermark_size_ratio: 0.04,
-    label: el.optLabel.value,
-    filename_template: el.optTemplate.value.trim() || '{name}_{index}',
-    output_dir: el.optOutDir.value.trim() || null,
-    write_sidecar: el.optSidecar.checked,
-  };
-}
-
-function renderExportResult(data) {
-  el.exportResult.innerHTML = '';
-
-  const pathLine = document.createElement('div');
-  pathLine.className = 'out-path';
-  pathLine.textContent = `输出目录：${data.output_dir}`;
-  el.exportResult.appendChild(pathLine);
-
-  if (data.files.length) {
-    const list = document.createElement('ul');
-    data.files.forEach((file) => {
-      const row = document.createElement('li');
-      row.textContent = `${file.name}（${file.width}×${file.height}）`;
-      list.appendChild(row);
-    });
-    el.exportResult.appendChild(list);
-  }
-
-  if (data.errors.length) {
-    const list = document.createElement('ul');
-    data.errors.forEach((error) => {
-      const row = document.createElement('li');
-      row.textContent = `失败：${error.image_id} - ${error.error}`;
-      list.appendChild(row);
-    });
-    el.exportResult.appendChild(list);
-  }
-}
-
-async function exportAll() {
-  const accepted = state.items.filter((item) => item.status === 'accepted' && item.quad);
-  if (!accepted.length) {
-    setExportStatus('还没有已接受的图片，请先对每张图点“接受本图”', 'error');
-    return;
-  }
-
-  el.btnExport.disabled = true;
-  setExportStatus(`正在导出 ${accepted.length} 张…`);
-  try {
-    const data = await api('/api/export', {
-      items: accepted.map((item) => ({
-        image_id: item.id,
-        quad: item.quad,
-        rotate: item.rotate || 0,
-      })),
-      options: readExportOptions(),
-    });
-    renderExportResult(data);
-    setExportStatus(
-      `导出完成：${data.count} 张${data.errors.length ? `，失败 ${data.errors.length} 张` : ''}`,
-      data.errors.length ? 'error' : 'ok'
-    );
-  } catch (error) {
-    setExportStatus(`导出失败：${error.message}`, 'error');
-  } finally {
-    el.btnExport.disabled = false;
-  }
-}
-
-// ---------------------------------------------------------------- 事件绑定
-
-el.fileInput.addEventListener('change', () => {
-  uploadFiles(el.fileInput.files);
-  el.fileInput.value = '';
-});
-
-el.btnRedetect.addEventListener('click', async () => {
-  if (!view.item) return;
-  setStatus('正在重新检测…');
-  await detectItem(view.item, false);
-});
-
-el.btnRotate.addEventListener('click', async () => {
-  if (!view.item || view.item.status === 'error') return;
-  const item = view.item;
-  item.rotate = (item.rotate + 90) % 360;
-  item.edited = true;
-  updateMeta();
-  setStatus(`输出将顺时针旋转 ${item.rotate}°`);
-  if (item.status === 'accepted') await acceptItem(item, true);
-  renderList();
-});
-
-el.btnAccept.addEventListener('click', () => {
-  if (view.item) acceptItem(view.item, false);
-});
-
-el.btnReject.addEventListener('click', () => {
-  const item = view.item;
-  if (!item || item.status === 'error') return;
-  item.status = 'rejected';
-  item.cropUrl = null;
-  renderList();
-  renderResults();
-  setStatus(`已丢弃：${item.name}`);
-});
-
-el.btnAcceptAll.addEventListener('click', async () => {
-  const targets = state.items.filter((item) => item.quad && item.status !== 'rejected' && item.status !== 'error');
-  if (!targets.length) {
-    setStatus('没有可接受的图片', 'error');
-    return;
-  }
-  for (let index = 0; index < targets.length; index += 1) {
-    setStatus(`正在接受 ${index + 1}/${targets.length}…`);
-    await acceptItem(targets[index], true);
-  }
-  setStatus(`已接受 ${targets.filter((item) => item.status === 'accepted').length} 张`, 'ok');
-});
-
-el.btnClear.addEventListener('click', () => {
-  state.items = [];
-  state.selectedId = null;
-  view.item = null;
-  view.img = null;
-  view.dragMode = null;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  canvas.removeAttribute('width');
-  canvas.removeAttribute('height');
-  canvas.style.display = 'none';
-  el.emptyHint.hidden = false;
-  el.editorTitle.textContent = '未选择图片';
-  el.metaInfo.textContent = '';
-  el.cropPreview.innerHTML = '';
-  el.regionChips.innerHTML = '';
-  el.exportResult.innerHTML = '';
-  setExportStatus('');
-  setStatus('列表已清空（已导出的文件不会被删除）');
-  renderList();
-  renderResults();
-});
-
-el.btnExport.addEventListener('click', exportAll);
-
-el.optQuality.addEventListener('input', () => {
-  el.qualityValue.textContent = el.optQuality.value;
-});
-el.optWmOpacity.addEventListener('input', () => {
-  el.opacityValue.textContent = `${el.optWmOpacity.value}%`;
-});
-
-document.addEventListener('dragover', (event) => {
-  event.preventDefault();
-  el.canvasWrap.classList.add('dragging');
-});
-document.addEventListener('dragleave', (event) => {
-  if (event.relatedTarget === null) el.canvasWrap.classList.remove('dragging');
-});
-document.addEventListener('drop', (event) => {
-  event.preventDefault();
-  el.canvasWrap.classList.remove('dragging');
-  if (event.dataTransfer && event.dataTransfer.files.length) {
-    uploadFiles(event.dataTransfer.files);
-  }
-});
-
-window.addEventListener('resize', () => {
-  if (view.img) drawCanvas();
-});
-
-// ---------------------------------------------------------------- 初始化
-
-renderList();
-renderResults();
-setStatus('就绪：导入图片后会自动检测');
+async function detectItem(item,quiet){if(!item?.id||item.status==='error')return;item.status='detecting';item.reason=null;item.cropUrl=null;renderList();try{const data=await api('/api/detect',{image_id:item.id});item.regions=data.regions||[];item.reason=data.reason;item.detectMs=data.detect_ms;item.regionIndex=0;if(item.regions.length){item.quad=item.regions[0].quad.map(([x,y])=>[Number(x),Number(y)]);item.confidence=item.regions[0].confidence;item.status=data.status==='ok'?'ok':'failed';}else{item.quad=defaultQuad(item);item.confidence=null;item.status='failed';}item.edited=false;if(!quiet&&state.selectedId===item.id)setStatus(item.status==='ok'?'Boundary found. Drag corners to refine the crop.':'Review the suggested crop and adjust it manually.',item.status==='ok'?'ok':'error');}catch(error){item.status='failed';item.reason='error';item.quad=defaultQuad(item);if(!quiet)setStatus(`Detection failed: ${error.message}`,'error');}renderList();renderResults();if(state.selectedId===item.id){drawCanvas();updateMeta();renderChips();scheduleLivePreview(item);}}
+async function acceptItem(item,quiet){if(!item?.quad||item.status==='error')return false;try{const data=await api('/api/crop',{image_id:item.id,quad:item.quad,rotate:item.rotate||0,flip_h:!!item.flipH,flip_v:!!item.flipV});item.cropUrl=data.url;item.cropW=data.width;item.cropH=data.height;item.status='accepted';state.exported=false;renderList();renderResults();if(state.selectedId===item.id){scheduleLivePreview(item);if(!quiet)setStatus(`Accepted ${item.name}. The crop is ready for export.`,'ok');}return true;}catch(error){setStatus(`Could not accept crop: ${error.message}`,'error');return false;}}
+function renderResults(){const accepted=state.items.filter(item=>item.status==='accepted'&&item.cropUrl);el.resultCount.textContent=String(accepted.length);el.resultGrid.innerHTML='';if(!accepted.length){const p=document.createElement('p');p.className='placeholder';p.textContent='Accepted crops will appear here.';el.resultGrid.appendChild(p);return;}accepted.forEach(item=>{const card=document.createElement('div');card.className='result-card';const image=document.createElement('img');image.src=item.cropUrl;image.alt=item.name;image.title='Select this image to adjust the crop';image.addEventListener('click',()=>selectItem(item.id));const caption=document.createElement('div');caption.className='cap';const title=document.createElement('strong');title.textContent=item.name;title.title=item.name;const size=document.createElement('span');size.textContent=`${item.cropW} × ${item.cropH}`;caption.append(title,size);card.append(image,caption);el.resultGrid.appendChild(card);});}
+function readExportOptions(){const raw=el.optMaxEdge.value.trim();return{fmt:el.optFormat.value,quality:Number(el.optQuality.value),max_long_edge:raw?Number(raw):null,...watermarkPreviewOptions(),label:el.optLabel.value.trim(),filename_template:el.optTemplate.value.trim()||'{name}_{index}',output_dir:el.optOutDir.value.trim()||null,write_sidecar:el.optSidecar.checked};}
+function renderExportResult(data){el.exportResult.innerHTML='';const path=document.createElement('div');path.className='out-path';path.textContent=`Output folder: ${data.output_dir}`;el.exportResult.appendChild(path);if(data.files.length){const list=document.createElement('ul');data.files.forEach(file=>{const row=document.createElement('li');row.textContent=`${file.name} (${file.width} × ${file.height})`;list.appendChild(row);});el.exportResult.appendChild(list);}if(data.errors.length){const list=document.createElement('ul');data.errors.forEach(error=>{const row=document.createElement('li');row.textContent=`Failed: ${error.image_id} — ${error.error}`;list.appendChild(row);});el.exportResult.appendChild(list);}}
+async function exportAll(){if(isWatermarkEnabled()&&selectedWatermarkType()==='image'&&!state.watermarkId){setExportStatus('Choose a watermark image or select No watermark.','error');return;}const accepted=state.items.filter(item=>item.status==='accepted'&&item.quad);if(!accepted.length){setExportStatus('No accepted crops yet. Review and accept images before exporting.','error');return;}el.btnExport.disabled=true;setExportStatus(`Exporting ${accepted.length} image${accepted.length===1?'':'s'}…`);try{const data=await api('/api/export',{items:accepted.map(item=>({image_id:item.id,quad:item.quad,rotate:item.rotate||0,flip_h:!!item.flipH,flip_v:!!item.flipV})),options:readExportOptions()});renderExportResult(data);state.exported=data.count>0;updateWorkflow();setExportStatus(`Exported ${data.count} image${data.count===1?'':'s'}${data.errors.length?`; ${data.errors.length} failed`:''}.`,data.errors.length?'error':'ok');}catch(error){setExportStatus(`Export failed: ${error.message}`,'error');}finally{el.btnExport.disabled=false;}}
+function updateWatermarkMode(){const enabled=isWatermarkEnabled(),type=selectedWatermarkType();el.textWatermarkFields.hidden=!enabled||type!=='text';el.imageWatermarkFields.hidden=!enabled||type!=='image';scheduleLivePreview();}
+async function removeWatermark(){if(!state.watermarkId)return;try{await api('/api/watermark/remove',{watermark_id:state.watermarkId});state.watermarkId=null;state.watermarkName='';el.watermarkFileName.textContent='Transparent PNG recommended';el.btnClearWatermark.hidden=true;scheduleLivePreview();}catch(error){setExportStatus(`Could not remove watermark image: ${error.message}`,'error');}}
+
+el.fileInput.addEventListener('change',()=>{uploadFiles(el.fileInput.files);el.fileInput.value='';});
+el.btnRedetect.addEventListener('click',async()=>{if(!view.item)return;resetAcceptedState(view.item);setStatus('Detecting the page boundary again…');await detectItem(view.item,false);});
+function rotateCrop(direction){if(!view.item||view.item.status==='error')return;const i=view.item;i.rotate=(i.rotate+direction*90+360)%360;i.edited=true;state.exported=false;resetAcceptedState(i);updateMeta();drawCanvas();renderList();setStatus(`Rotated 90° ${direction<0?'left':'right'}.`);scheduleLivePreview(i);}el.btnRotateLeft.addEventListener('click',()=>rotateCrop(-1));el.btnRotateRight.addEventListener('click',()=>rotateCrop(1));
+function flip(axis){if(!view.item||view.item.status==='error')return;const i=view.item,key=axis==='h'?'flipH':'flipV';i[key]=!i[key];i.edited=true;state.exported=false;resetAcceptedState(i);updateMeta();drawCanvas();renderList();setStatus(`${axis==='h'?'Horizontal':'Vertical'} mirror ${i[key]?'on':'off'}.`);scheduleLivePreview(i);}
+el.btnFlipH.addEventListener('click',()=>flip('h'));el.btnFlipV.addEventListener('click',()=>flip('v'));el.btnAccept.addEventListener('click',()=>{if(view.item)acceptItem(view.item,false);});
+el.btnReject.addEventListener('click',async()=>{const item=view.item;if(!item)return;const index=state.items.indexOf(item),next=state.items[index+1]||state.items[index-1]||null;el.btnReject.disabled=true;try{if(!item.id.startsWith('invalid-')){const r=await api('/api/clear',{image_ids:[item.id],watermark_ids:[]});if(r.errors?.length)throw new Error(r.errors.join('; '));}state.items=state.items.filter(entry=>entry.id!==item.id);state.exported=false;state.selectedId=null;view.item=null;view.img=null;renderList();renderResults();if(next&&state.items.some(entry=>entry.id===next.id))selectItem(next.id);else{el.editorTitle.textContent='Ready to edit';el.metaInfo.textContent='';canvas.style.display='none';el.emptyHint.hidden=false;setPreviewPlaceholder('Preview appears here','Adjust a crop to see the finished image.');}setStatus(`Removed ${item.name} from the queue and deleted its temporary files.`,'ok');}catch(error){setStatus(`Could not remove image: ${error.message}`,'error');}finally{el.btnReject.disabled=false;}});
+el.btnAcceptAll.addEventListener('click',async()=>{const targets=state.items.filter(item=>item.quad&&item.status!=='error');if(!targets.length){setStatus('No images are ready to accept.','error');return;}el.btnAcceptAll.disabled=true;for(let i=0;i<targets.length;i++){setStatus(`Accepting ${i+1} of ${targets.length}…`);await acceptItem(targets[i],true);}setStatus(`${targets.filter(item=>item.status==='accepted').length} crop${targets.length===1?'':'s'} accepted.`,'ok');el.btnAcceptAll.disabled=false;});
+el.btnClear.addEventListener('click',async()=>{const image_ids=state.items.map(item=>item.id).filter(id=>id&&!id.startsWith('invalid-')),watermark_ids=state.watermarkId?[state.watermarkId]:[];el.btnClear.disabled=true;try{if(image_ids.length||watermark_ids.length){const r=await api('/api/clear',{image_ids,watermark_ids});if(r.errors?.length)throw new Error(r.errors.join('; '));}state.items=[];state.exported=false;state.selectedId=null;state.watermarkId=null;state.watermarkName='';view.item=null;view.img=null;view.dragMode=null;view.previewSequence++;if(view.previewController)view.previewController.abort();clearPreviewUrl();ctx.clearRect(0,0,canvas.width,canvas.height);canvas.removeAttribute('width');canvas.removeAttribute('height');canvas.style.display='none';el.emptyHint.hidden=false;el.editorTitle.textContent='Ready to edit';el.metaInfo.textContent='';el.regionChips.innerHTML='';el.exportResult.innerHTML='';el.watermarkFileName.textContent='Transparent PNG recommended';el.btnClearWatermark.hidden=true;setPreviewPlaceholder('Preview appears here','Adjust a crop to see the finished image.');setExportStatus('');renderList();renderResults();setStatus('Session cleared. Exported images were kept.');}catch(error){setStatus(`Could not clear temporary files: ${error.message}`,'error');}finally{el.btnClear.disabled=false;}});
+el.btnExport.addEventListener('click',exportAll);
+el.btnBrowseOutput.addEventListener('click',async()=>{el.btnBrowseOutput.disabled=true;el.btnBrowseOutput.textContent='Opening…';try{const d=await api('/api/browse-output',{});if(!d.cancelled&&d.path){el.optOutDir.value=d.path;setExportStatus(`Output folder selected: ${d.path}`,'ok');}}catch(error){setExportStatus(`Could not open folder picker: ${error.message}`,'error');}finally{el.btnBrowseOutput.disabled=false;el.btnBrowseOutput.textContent='Choose Folder';}});
+el.watermarkInput.addEventListener('change',async()=>{const file=el.watermarkInput.files?.[0];el.watermarkInput.value='';if(!file)return;const form=new FormData();form.append('file',file);el.watermarkFileName.textContent='Adding image…';try{const response=await fetch('/api/watermark',{method:'POST',body:form}),data=await response.json();if(!response.ok)throw new Error(data.detail||'Could not add this watermark image.');const old=state.watermarkId;state.watermarkId=data.watermark_id;state.watermarkName=data.name;el.watermarkFileName.textContent=data.name;el.btnClearWatermark.hidden=false;document.querySelector('input[name="watermarkType"][value="image"]').checked=true;el.optWmEnabled.checked=false;updateWatermarkMode();if(old)await api('/api/watermark/remove',{watermark_id:old});}catch(error){el.watermarkFileName.textContent='Transparent PNG recommended';setExportStatus(`Could not add watermark image: ${error.message}`,'error');}});
+el.btnClearWatermark.addEventListener('click',removeWatermark);
+document.querySelectorAll('input[name="watermarkType"]').forEach(input=>input.addEventListener('change',updateWatermarkMode));el.optWmEnabled.addEventListener('change',updateWatermarkMode);
+el.optQuality.addEventListener('input',()=>{el.qualityValue.textContent=`${el.optQuality.value}%`;});el.optWmOpacity.addEventListener('input',()=>{el.opacityValue.textContent=`${el.optWmOpacity.value}%`;scheduleLivePreview();});el.optWmSize.addEventListener('input',()=>{el.wmSizeValue.textContent=`${el.optWmSize.value}%`;scheduleLivePreview();});el.optWmColor.addEventListener('input',()=>{el.wmColorValue.textContent=el.optWmColor.value.toUpperCase();scheduleLivePreview();});
+[el.optWmText,el.optWmPos,el.optWmFont,el.optWmStyle].forEach(control=>control.addEventListener('input',()=>scheduleLivePreview()));[el.optLabel,el.optTemplate,el.optFormat].forEach(control=>control.addEventListener('input',updateFilenameExample));
+function updateFilenameExample(){const item=view.item,source=item?.name?item.name.replace(/\.[^.]+$/,''):'scan',label=el.optLabel.value.trim()||'label',template=el.optTemplate.value.trim()||'{name}_{index}';const name=template.replaceAll('{name}',source).replaceAll('{index}','1').replaceAll('{label}',label).replaceAll('{date}',new Date().toISOString().slice(0,10).replaceAll('-',''));const ext=el.optFormat.value==='png'?'png':'jpg';el.filenameExample.textContent=`${name.replace(/[<>:"/\\|?*\r\n\t]/g,'_').replaceAll(' ','_')||'scan_1'}.${ext}`;}
+
+document.addEventListener('dragover',event=>{event.preventDefault();el.canvasWrap.classList.add('dragging');});document.addEventListener('dragleave',event=>{if(event.relatedTarget===null)el.canvasWrap.classList.remove('dragging');});document.addEventListener('drop',event=>{event.preventDefault();el.canvasWrap.classList.remove('dragging');if(event.dataTransfer?.files.length)uploadFiles(event.dataTransfer.files);});
+window.addEventListener('resize',()=>{if(view.img)drawCanvas();});window.addEventListener('beforeunload',clearPreviewUrl);
+renderList();renderResults();updateWatermarkMode();updateFilenameExample();setPreviewPlaceholder('Preview appears here','Adjust a crop to see the finished image.');setStatus('Ready. Add images to start.');

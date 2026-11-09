@@ -1,8 +1,4 @@
-"""上传文件的登记表。
-
-图片以 uuid 作为 id 存在 data/uploads 下，元数据写入 data/manifest.json，
-这样后端重启后仍然能认出之前上传的图片。
-"""
+"""Thread-safe manifest storage for uploaded image metadata."""
 
 from __future__ import annotations
 
@@ -13,6 +9,8 @@ from pathlib import Path
 
 
 class Store:
+    """Keep upload metadata between local application restarts."""
+
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = Path(data_dir)
         self.manifest_path = self.data_dir / "manifest.json"
@@ -24,15 +22,24 @@ class Store:
         if not self.manifest_path.exists():
             return
         try:
-            self._items = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+            loaded = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             self._items = {}
+            return
+        if isinstance(loaded, dict):
+            self._items = {
+                key: value
+                for key, value in loaded.items()
+                if isinstance(key, str) and isinstance(value, dict)
+            }
 
     def _save(self) -> None:
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        self.manifest_path.write_text(
+        temporary = self.manifest_path.with_suffix(".json.tmp")
+        temporary.write_text(
             json.dumps(self._items, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        temporary.replace(self.manifest_path)
 
     def add(self, record: dict) -> None:
         with self._lock:
@@ -40,21 +47,32 @@ class Store:
             self._save()
 
     def get(self, image_id: str) -> dict | None:
-        return self._items.get(image_id)
+        with self._lock:
+            record = self._items.get(image_id)
+            return dict(record) if record is not None else None
+
+    def delete(self, image_id: str) -> dict | None:
+        with self._lock:
+            record = self._items.pop(image_id, None)
+            if record is not None:
+                self._save()
+                return dict(record)
+            return None
 
     def all(self) -> list[dict]:
-        return list(self._items.values())
+        with self._lock:
+            return [dict(record) for record in self._items.values()]
 
     def touch(self, image_id: str) -> None:
-        record = self._items.get(image_id)
-        if record is None:
-            return
-        record["last_used_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         with self._lock:
+            record = self._items.get(image_id)
+            if record is None:
+                return
+            record["last_used_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             self._save()
 
-    # 路径一律由 id + 受控扩展名拼出，不直接使用前端传来的路径
     def file_path(self, record: dict) -> Path:
+        """Build an upload path from its stored identifier and extension."""
         return self.data_dir / "uploads" / f"{record['id']}{record['ext']}"
 
     @staticmethod

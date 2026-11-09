@@ -1,7 +1,4 @@
-"""导出阶段：降采样、水印、标签命名、写盘。
-
-所有导出选项都在这里集中处理，前端只负责把选项传进来。
-"""
+"""Export crops with optional downsampling, watermarking, and sidecar metadata."""
 
 from __future__ import annotations
 
@@ -11,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import cv2
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageColor, ImageDraw, ImageFont
 
 from .detector import crop_region
 
@@ -21,19 +18,17 @@ POSITIONS = {
     "bottom-left", "bottom-center", "bottom-right",
 }
 
-_FONT_CANDIDATES = [
-    r"C:\Windows\Fonts\msyh.ttc",      # 微软雅黑，支持中文
-    r"C:\Windows\Fonts\msyhbd.ttc",
-    r"C:\Windows\Fonts\simhei.ttf",
-    "arial.ttf",
-    "DejaVuSans.ttf",
-]
+_FONT_CANDIDATES = {
+    "sans": [r"C:\Windows\Fonts\arial.ttf", "arial.ttf", "DejaVuSans.ttf"],
+    "serif": [r"C:\Windows\Fonts\times.ttf", "times.ttf", "DejaVuSerif.ttf"],
+    "mono": [r"C:\Windows\Fonts\consola.ttf", "consola.ttf", "DejaVuSansMono.ttf"],
+}
 
 _INVALID_CHARS = '<>:"/\\|?*\r\n\t'
 
 
-def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for candidate in _FONT_CANDIDATES:
+def _load_font(size: int, family: str = "sans") -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    for candidate in _FONT_CANDIDATES.get(family, _FONT_CANDIDATES["sans"]):
         try:
             return ImageFont.truetype(candidate, size)
         except OSError:
@@ -42,7 +37,7 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def downsample(image: Image.Image, max_long_edge: int) -> Image.Image:
-    """只缩小不放大，用 LANCZOS 保证质量。"""
+    """Downsample without enlarging, using the LANCZOS filter."""
     width, height = image.size
     longest = max(width, height)
     if max_long_edge <= 0 or longest <= max_long_edge:
@@ -52,44 +47,100 @@ def downsample(image: Image.Image, max_long_edge: int) -> Image.Image:
     return image.resize(size, Image.LANCZOS)
 
 
+def _watermark_position(position: str, image_size: tuple[int, int], mark_size: tuple[int, int], margin: int) -> tuple[int, int]:
+    width, height = image_size
+    mark_w, mark_h = mark_size
+    horizontal = "left" if position.endswith("left") else "right" if position.endswith("right") else "center"
+    vertical = "top" if position.startswith("top") else "bottom" if position.startswith("bottom") else "middle"
+    x = margin if horizontal == "left" else width - mark_w - margin if horizontal == "right" else (width - mark_w) // 2
+    y = margin if vertical == "top" else height - mark_h - margin if vertical == "bottom" else (height - mark_h) // 2
+    return max(0, x), max(0, y)
+
+
 def add_watermark(
     image: Image.Image,
     text: str,
     position: str = "bottom-right",
-    opacity: float = 0.35,
-    size_ratio: float = 0.04,
+    opacity: float = 0.55,
+    size_ratio: float = 0.05,
+    color: str = "#FFFFFF",
+    font_family: str = "sans",
+    style: str = "outline",
 ) -> Image.Image:
     if position not in POSITIONS:
         position = "bottom-right"
-    image = image.convert("RGBA")
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    base = image.convert("RGBA")
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-
-    font_size = max(12, int(min(image.size) * max(0.01, min(size_ratio, 0.2))))
-    font = _load_font(font_size)
+    font_size = max(12, int(min(base.size) * max(0.01, min(size_ratio, 0.2))))
+    font = _load_font(font_size, font_family)
     left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
     text_w, text_h = right - left, bottom - top
-
-    margin = int(min(image.size) * 0.03)
-    width, height = image.size
-    if position.startswith("top"):
-        x, y = margin, margin - top
-    elif position.startswith("bottom"):
-        x, y = margin, height - text_h - margin - top
-    else:
-        x, y = margin, (height - text_h) // 2 - top
-    if position.endswith("right"):
-        x = width - text_w - margin - left
-    elif position.endswith("center"):
-        x = (width - text_w) // 2 - left
-
+    margin = max(8, int(min(base.size) * 0.03))
+    x, y = _watermark_position(position, base.size, (text_w, text_h), margin)
+    x -= left
+    y -= top
     alpha = int(255 * max(0.0, min(1.0, opacity)))
-    # 深色描边保证浅色照片上也看得清
-    for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2)):
-        draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0, alpha))
-    draw.text((x, y), text, font=font, fill=(255, 255, 255, alpha))
+    rgb = ImageColor.getrgb(color)
+    if style == "badge":
+        pad_x = max(7, font_size // 3)
+        pad_y = max(4, font_size // 5)
+        box = (x + left - pad_x, y + top - pad_y, x + right + pad_x, y + bottom + pad_y)
+        draw.rounded_rectangle(box, radius=max(4, font_size // 5), fill=(14, 25, 43, int(alpha * 0.72)))
+    if style == "outline":
+        stroke = max(1, font_size // 14)
+        draw.text((x, y), text, font=font, fill=(*rgb, alpha), stroke_width=stroke, stroke_fill=(8, 15, 26, int(alpha * 0.9)))
+    else:
+        draw.text((x, y), text, font=font, fill=(*rgb, alpha))
+    return Image.alpha_composite(base, overlay).convert("RGB")
 
-    return Image.alpha_composite(image, overlay).convert("RGB")
+
+def add_image_watermark(
+    image: Image.Image,
+    watermark_path: Path,
+    position: str = "bottom-right",
+    opacity: float = 0.55,
+    size_ratio: float = 0.05,
+) -> Image.Image:
+    if position not in POSITIONS:
+        position = "bottom-right"
+    base = image.convert("RGBA")
+    with Image.open(watermark_path) as opened:
+        mark = opened.convert("RGBA")
+    longest = max(1, int(min(base.size) * max(0.01, min(size_ratio, 0.2))))
+    scale = min(1.0, longest / max(mark.size))
+    mark = mark.resize((max(1, round(mark.width * scale)), max(1, round(mark.height * scale))), Image.Resampling.LANCZOS)
+    alpha = mark.getchannel("A").point(lambda value: round(value * max(0.0, min(1.0, opacity))))
+    mark.putalpha(alpha)
+    margin = max(8, int(min(base.size) * 0.03))
+    x, y = _watermark_position(position, base.size, mark.size, margin)
+    base.alpha_composite(mark, (x, y))
+    return base.convert("RGB")
+
+
+def apply_watermark(image: Image.Image, options: dict[str, Any], watermark_path: Path | str | None = None) -> Image.Image:
+    if not options.get("watermark_enabled"):
+        return image.convert("RGB")
+    position = options.get("watermark_position") or "bottom-right"
+    opacity = float(options.get("watermark_opacity") if options.get("watermark_opacity") is not None else 0.55)
+    size_ratio = float(options.get("watermark_size_ratio") if options.get("watermark_size_ratio") is not None else 0.05)
+    if options.get("watermark_type") == "image":
+        if watermark_path:
+            return add_image_watermark(image, Path(watermark_path), position, opacity, size_ratio)
+        return image.convert("RGB")
+    text = (options.get("watermark_text") or "").strip()
+    if not text:
+        return image.convert("RGB")
+    return add_watermark(
+        image,
+        text,
+        position=position,
+        opacity=opacity,
+        size_ratio=size_ratio,
+        color=options.get("watermark_color") or "#FFFFFF",
+        font_family=options.get("watermark_font") or "sans",
+        style=options.get("watermark_style") or "outline",
+    )
 
 
 def sanitize_filename(text: str, max_length: int = 90) -> str:
@@ -140,12 +191,14 @@ def export_item(
     out_dir: Path,
     inset_px: float,
 ) -> dict[str, Any]:
-    """裁剪 -> 降采样 -> 水印 -> 按模板命名 -> 写盘 -> 可选 sidecar。"""
+    """Crop, downsample, watermark, name, and save one image with optional metadata."""
     cropped = crop_region(
         image_bgr,
         quad,
         inset_px=inset_px,
         rotate=int(options.get("rotate") or 0),
+        flip_h=bool(options.get("flip_h")),
+        flip_v=bool(options.get("flip_v")),
     )
     image = Image.fromarray(cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB))
 
@@ -153,15 +206,7 @@ def export_item(
     if max_edge:
         image = downsample(image, int(max_edge))
 
-    watermark_text = (options.get("watermark_text") or "").strip()
-    if watermark_text:
-        image = add_watermark(
-            image,
-            watermark_text,
-            position=options.get("watermark_position") or "bottom-right",
-            opacity=float(options.get("watermark_opacity") if options.get("watermark_opacity") is not None else 0.35),
-            size_ratio=float(options.get("watermark_size_ratio") if options.get("watermark_size_ratio") is not None else 0.04),
-        )
+    image = apply_watermark(image, options, options.get("watermark_path"))
 
     label = (options.get("label") or "").strip()
     stem = build_stem(
@@ -185,6 +230,8 @@ def export_item(
                     "label": label,
                     "quad": [[round(float(x), 1), round(float(y), 1)] for x, y in quad],
                     "rotate": int(options.get("rotate") or 0),
+                    "flip_h": bool(options.get("flip_h")),
+                    "flip_v": bool(options.get("flip_v")),
                     "exported_at": datetime.now().isoformat(timespec="seconds"),
                 },
                 ensure_ascii=False,

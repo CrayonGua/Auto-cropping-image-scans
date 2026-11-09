@@ -1,138 +1,209 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
+<!doctype html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>扫描件自动裁剪 · Auto Crop for Scans</title>
+  <meta name="theme-color" content="#101b33">
+  <title>Auto Crop for Scans</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <span class="brand-name">扫描件自动裁剪</span>
-      <span class="brand-sub">自动识别 · 透视校正 · 批量导出</span>
+    <div class="brand-lockup">
+      <span class="brand-mark" aria-hidden="true">AC</span>
+      <div class="brand">
+        <span class="brand-name">Auto Crop <span>Studio</span></span>
+        <span class="brand-sub">Scan cleanup, made simple</span>
+      </div>
     </div>
+    <nav class="workflow" aria-label="Workflow">
+      <span class="workflow-step active"><b>01</b> Queue</span>
+      <span class="workflow-line"></span>
+      <span class="workflow-step"><b>02</b> Adjust</span>
+      <span class="workflow-line"></span>
+      <span class="workflow-step"><b>03</b> Preview</span>
+      <span class="workflow-line"></span>
+      <span class="workflow-step"><b>04</b> Export</span>
+    </nav>
     <div class="topbar-actions">
-      <label class="btn primary" for="fileInput">导入图片</label>
+      <label class="btn primary" for="fileInput"><span class="button-icon">＋</span> Add Images</label>
       <input id="fileInput" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" multiple hidden>
-      <button id="btnAcceptAll" class="btn" type="button">全部接受</button>
-      <button id="btnClear" class="btn ghost" type="button">清空列表</button>
+      <button id="btnAcceptAll" class="btn secondary" type="button">Accept All</button>
+      <button id="btnClear" class="btn quiet" type="button">Clear Session</button>
     </div>
   </header>
 
-  <p class="notice" id="notice">
-    也可以把图片直接拖进窗口。所有处理都在本机完成，图片不会上传到任何服务器。
-  </p>
+  <div class="notice" id="notice">
+    <span class="notice-icon" aria-hidden="true">●</span>
+    <span>Images are processed on this computer. Imported files remain in the local project until removed or the session is cleared.</span>
+    <span class="notice-shortcut">Drop files anywhere to add them</span>
+  </div>
 
+  <form id="exportForm" onsubmit="return false;">
   <main class="layout">
-    <aside class="panel list-panel">
+    <aside class="panel list-panel" aria-label="Image queue">
       <div class="panel-head">
-        <span>图片列表</span>
+        <div><span class="eyebrow">WORKSPACE</span><strong>Image Queue</strong></div>
         <span class="pill" id="countBadge">0</span>
       </div>
-      <div id="fileList" class="file-list">
-        <p class="placeholder">还没有导入图片</p>
+      <div class="queue-summary"><span id="queueSummary">Add scans to begin</span><span class="queue-mark">LOCAL</span></div>
+      <div id="fileList" class="file-list" aria-live="polite">
+        <div class="queue-empty"><span class="empty-plus">＋</span><strong>Your queue is empty</strong><span>Add or drop scanned images to start cropping.</span></div>
       </div>
+      <div class="queue-foot">Newest images appear first</div>
     </aside>
 
-    <section class="panel editor-panel">
+    <section class="panel editor-panel" aria-label="Crop editor">
       <div class="editor-toolbar">
-        <span id="editorTitle" class="editor-title">未选择图片</span>
-        <span id="metaInfo" class="meta"></span>
-        <div class="spacer"></div>
-        <div id="regionChips" class="chips"></div>
-        <button id="btnRedetect" class="btn small" type="button">重新检测</button>
-        <button id="btnRotate" class="btn small" type="button">旋转 90°</button>
-        <button id="btnAccept" class="btn small primary" type="button">接受本图</button>
-        <button id="btnReject" class="btn small ghost" type="button">丢弃</button>
-      </div>
-
-      <div class="canvas-wrap" id="canvasWrap">
-        <canvas id="canvas"></canvas>
-        <div id="emptyHint" class="empty-hint">
-          <strong>导入图片开始</strong>
-          <span>自动检测后，可拖拽四个角点微调；无法检测时也可手动框选。</span>
+        <div class="editor-heading">
+          <span class="eyebrow">CROP EDITOR</span>
+          <strong id="editorTitle" class="editor-title">Ready to edit</strong>
         </div>
+        <span id="metaInfo" class="meta"></span>
+        <div class="toolbar-spacer"></div>
+        <div id="regionChips" class="chips" aria-label="Detected candidates"></div>
+        <div class="tool-group">
+          <button id="btnRedetect" class="btn tool" type="button" title="Detect the page boundary again">Detect</button>
+          <button id="btnRotateLeft" class="btn tool rotate-tool" type="button" title="Rotate the crop 90 degrees counterclockwise"><span aria-hidden="true">↶</span> Rotate Left</button>
+          <button id="btnRotateRight" class="btn tool rotate-tool" type="button" title="Rotate the crop 90 degrees clockwise"><span aria-hidden="true">↷</span> Rotate Right</button>
+          <button id="btnFlipH" class="btn tool" type="button" title="Mirror the crop horizontally">Flip H</button>
+          <button id="btnFlipV" class="btn tool" type="button" title="Mirror the crop vertically">Flip V</button>
+        </div>
+        <button id="btnAccept" class="btn accept" type="button">Accept Crop <span>→</span></button>
+        <button id="btnReject" class="btn danger" type="button">Reject</button>
       </div>
 
+      <div class="editor-body">
+        <div class="canvas-wrap" id="canvasWrap">
+          <canvas id="canvas" aria-label="Image crop editor"></canvas>
+          <div id="emptyHint" class="empty-hint">
+            <span class="empty-illustration" aria-hidden="true">▧</span>
+            <strong>Add an image to begin</strong>
+            <span>Drag the corners to set the crop. Drag inside the frame to move it.</span>
+          </div>
+        </div>
+        <div class="editor-instructions"><span class="drag-symbol" aria-hidden="true">↗</span> Drag corners to adjust <span class="instruction-dot">•</span> Drag inside the frame to move</div>
+      </div>
       <div class="editor-foot">
-        <div class="status" id="statusText">就绪</div>
-        <div class="crop-preview" id="cropPreview"></div>
+        <div class="status-indicator"><span class="status-dot"></span><div class="status" id="statusText" role="status" aria-live="polite">Ready. Add images to start.</div></div>
+        <span class="editor-foot-note">Changes update the preview automatically</span>
       </div>
     </section>
+
+    <aside class="panel live-preview-panel" aria-label="Live crop preview and watermark settings">
+      <div class="preview-visual">
+        <div class="panel-head preview-head">
+          <div><span class="eyebrow">LIVE OUTPUT</span><strong>Crop Preview</strong></div>
+          <span id="previewState" class="preview-live"><span></span> LIVE</span>
+        </div>
+        <div class="live-preview-stage" id="livePreviewStage">
+          <img id="livePreviewImage" alt="Live crop preview" hidden>
+          <div id="previewPlaceholder" class="preview-placeholder"><span class="preview-frame" aria-hidden="true">◇</span><strong>Preview appears here</strong><span>Adjust a crop to see the finished image.</span></div>
+        </div>
+        <div class="preview-caption"><span id="previewCaption">Waiting for an image</span><span id="previewDimensions"></span></div>
+        <div class="preview-tip"><span aria-hidden="true">✦</span> Watermark changes appear in this preview.</div>
+      </div>
+      <div class="form-section preview-watermark-settings">
+        <div class="form-section-title preview-watermark-title"><div><strong>Watermark</strong><small>Adjust settings and see the result above.</small></div></div>
+        <div class="watermark-type" role="group" aria-label="Watermark type">
+          <label class="type-choice"><input type="radio" name="watermarkType" value="text" checked><span>Text watermark</span></label>
+          <label class="type-choice"><input type="radio" name="watermarkType" value="image"><span>Image / sticker</span></label>
+          <label class="watermark-off"><input id="optWmEnabled" type="checkbox"><span>No watermark</span></label>
+        </div>
+        <div id="textWatermarkFields" class="form-grid watermark-fields">
+          <label class="span-2">Watermark text
+            <input id="optWmText" type="text" maxlength="120" placeholder="For example, Family Archive">
+          </label>
+          <label>Font style
+            <select id="optWmFont"><option value="sans">Modern sans</option><option value="serif">Classic serif</option><option value="mono">Monospaced</option></select>
+          </label>
+          <label>Text treatment
+            <select id="optWmStyle"><option value="outline">Outlined</option><option value="plain">Plain</option><option value="badge">Label badge</option></select>
+          </label>
+          <label>Text colour
+            <div class="color-input"><input id="optWmColor" type="color" value="#ffffff"><span id="wmColorValue">#FFFFFF</span></div>
+          </label>
+        </div>
+        <div id="imageWatermarkFields" class="watermark-upload" hidden>
+          <div class="watermark-file-row"><label class="btn secondary" for="watermarkInput">Choose image or sticker</label><input id="watermarkInput" type="file" accept="image/png,image/jpeg,image/webp" hidden><span id="watermarkFileName">Transparent PNG recommended</span><button id="btnClearWatermark" class="btn quiet" type="button" hidden>Remove</button></div>
+        </div>
+        <div class="form-grid watermark-fields">
+          <label>Position
+            <select id="optWmPos">
+              <option value="top-left">Top left</option><option value="top-center">Top centre</option><option value="top-right">Top right</option>
+              <option value="middle-left">Middle left</option><option value="center">Centre</option><option value="middle-right">Middle right</option>
+              <option value="bottom-left">Bottom left</option><option value="bottom-center">Bottom centre</option><option value="bottom-right" selected>Bottom right</option>
+            </select>
+          </label>
+          <label>Size <span class="value" id="wmSizeValue">5%</span>
+            <input id="optWmSize" type="range" min="1" max="20" value="5">
+          </label>
+          <label>Opacity <span class="value" id="opacityValue">55%</span>
+            <input id="optWmOpacity" type="range" min="5" max="100" value="55">
+          </label>
+        </div>
+      </div>
+    </aside>
   </main>
 
-  <section class="panel results-panel">
-    <div class="panel-head">
-      <span>结果浏览</span>
+  <section class="panel results-panel" aria-label="Accepted crop previews">
+    <div class="panel-head section-head">
+      <div><span class="eyebrow">READY TO EXPORT</span><strong>Accepted Crops</strong></div>
       <span class="pill" id="resultCount">0</span>
     </div>
     <div id="resultGrid" class="result-grid">
-      <p class="placeholder">点击“接受本图”后，成品会出现在这里</p>
+      <p class="placeholder">Accepted crops will appear here.</p>
     </div>
   </section>
 
-  <section class="panel export-panel">
-    <div class="panel-head"><span>导出设置</span></div>
-    <form id="exportForm" class="export-form" onsubmit="return false;">
-      <div class="form-grid">
-        <label>输出格式
-          <select id="optFormat">
-            <option value="jpg">JPG</option>
-            <option value="png">PNG</option>
-          </select>
-        </label>
-        <label>JPG 质量 <span class="value" id="qualityValue">92</span>
-          <input id="optQuality" type="range" min="40" max="100" value="92">
-        </label>
-        <label>降采样长边（px，留空表示不缩放）
-          <input id="optMaxEdge" type="number" min="200" max="12000" placeholder="例如 1200">
-        </label>
-        <label>水印文字（留空表示不加水印）
-          <input id="optWmText" type="text" placeholder="例如 © 2026 Family Archive">
-        </label>
-        <label>水印位置
-          <select id="optWmPos">
-            <option value="top-left">左上</option>
-            <option value="top-center">上中</option>
-            <option value="top-right">右上</option>
-            <option value="middle-left">左中</option>
-            <option value="center">居中</option>
-            <option value="middle-right">右中</option>
-            <option value="bottom-left">左下</option>
-            <option value="bottom-center">下中</option>
-            <option value="bottom-right" selected>右下</option>
-          </select>
-        </label>
-        <label>水印透明度 <span class="value" id="opacityValue">35%</span>
-          <input id="optWmOpacity" type="range" min="0" max="100" value="35">
-        </label>
-        <label>标签（可留空）
-          <input id="optLabel" type="text" placeholder="例如 明信片">
-        </label>
-        <label>文件名模板
-          <input id="optTemplate" type="text" value="{name}_{index}" placeholder="{name}_{index}">
-        </label>
-        <label class="span-2">输出目录（绝对路径，留空则写入 data/exports/时间戳）
-          <input id="optOutDir" type="text" placeholder="D:\photo_archive">
-        </label>
-        <label class="checkbox span-2">
-          <input id="optSidecar" type="checkbox" checked>
-          同时写出同名 .json 元数据（含标签与四点坐标）
-        </label>
+  <section class="panel export-panel" aria-label="Export settings">
+    <div class="panel-head section-head">
+      <div><span class="eyebrow">FINAL STEP</span><strong>Export Settings</strong></div>
+      <span class="export-panel-note">Only accepted crops will be exported</span>
+    </div>
+    <div class="export-form">
+      <div class="form-section">
+        <div class="form-section-title"><span class="section-number">1</span><div><strong>Image output</strong><small>Choose the file format and size.</small></div></div>
+        <div class="form-grid">
+          <label>File format
+            <select id="optFormat"><option value="jpg">JPG</option><option value="png">PNG</option></select>
+          </label>
+          <label>JPG quality <span class="value" id="qualityValue">92%</span>
+            <input id="optQuality" type="range" min="40" max="100" value="92">
+          </label>
+          <label>Maximum long edge <span class="field-help">Leave blank to keep full size</span>
+            <input id="optMaxEdge" type="number" min="200" max="12000" placeholder="For example, 2400 px">
+          </label>
+          <label class="span-2">Output folder <span class="field-help">Choose a folder or enter a full path</span>
+            <div class="input-action"><input id="optOutDir" type="text" placeholder="Default: project exports folder"><button id="btnBrowseOutput" class="btn secondary" type="button">Choose Folder</button></div>
+          </label>
+        </div>
       </div>
-      <p class="hint">
-        模板占位符：<code>{name}</code> 原文件名、<code>{index}</code> 序号、<code>{label}</code> 标签、<code>{date}</code> 日期。
-        导出只包含“已接受”的图片。
-      </p>
-    </form>
+
+      <details class="form-section advanced-section">
+        <summary><span class="section-number">2</span><span><strong>File names and metadata</strong><small>Optional labels and crop-coordinate records.</small></span><span class="details-chevron">⌄</span></summary>
+        <div class="form-grid advanced-grid">
+          <label>Label <span class="field-help">Optional collection tag</span>
+            <input id="optLabel" type="text" maxlength="60" placeholder="For example, Postcards">
+            <span class="field-help">Used by the {label} filename token and saved in the JSON record.</span>
+          </label>
+          <label>Filename template <span class="field-help">Controls the exported image names</span>
+            <input id="optTemplate" type="text" value="{name}_{index}" maxlength="120" placeholder="{name}_{index}">
+            <span class="filename-example">Example: <b id="filenameExample">scan_1.jpg</b></span>
+          </label>
+          <label class="checkbox span-2"><input id="optSidecar" type="checkbox"><span><strong>Write a JSON metadata file beside each image</strong><small>Contains the source name, optional label, crop corner coordinates, rotation, and mirror settings. Useful for traceability or later processing.</small></span></label>
+          <p class="hint span-2">Filename tokens: <code>{name}</code> source name, <code>{index}</code> sequence number, <code>{label}</code> optional tag, <code>{date}</code> export date. JSON files are off by default.</p>
+        </div>
+      </details>
+    </div>
     <div class="export-actions">
-      <button id="btnExport" class="btn primary" type="button">批量导出</button>
-      <span class="status" id="exportStatus"></span>
+      <button id="btnExport" class="btn export-button" type="button"><span>Export Accepted Crops</span><span>→</span></button>
+      <span class="status" id="exportStatus" role="status" aria-live="polite"></span>
     </div>
     <div class="export-result" id="exportResult"></div>
   </section>
 
+  </form>
   <script src="app.js"></script>
 </body>
 </html>
